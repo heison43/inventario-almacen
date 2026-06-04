@@ -292,6 +292,10 @@ export async function createCampaignFromRows({
     `${a.location}-${a.material_code}-${a.batch}`.localeCompare(`${b.location}-${b.material_code}-${b.batch}`)
   );
 
+  if (!locations.length || !snapshotItems.length) {
+    throw new Error('No se encontraron ubicaciones para la zona indicada. Revisa la zona a contar o desactiva el filtro por zona si el archivo contiene varias zonas.');
+  }
+
   const zones = Array.from(new Set(locations.map((location) => location.zone).filter(Boolean))).sort();
   campaign.zone = zones.length === 1 ? zones[0] : (campaignZone || 'varias');
 

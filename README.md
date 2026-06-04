@@ -133,3 +133,8 @@ inventario.tudominio.com
 - Antes de iniciar una zona real, asegúrate de que el archivo cargado corresponda a la zona bloqueada para conteo.
 - La conciliación se realiza contra la foto del inventario cargada en `inventory_snapshot`.
 - Los datos de prueba se deben eliminar desde Supabase antes de iniciar el inventario real.
+
+
+## Versión v13 - sincronización segura
+
+Ajuste operativo: al sincronizar, los códigos nuevos eliminados en Supabase se limpian localmente solo si ya estaban sincronizados y no tienen cambios pendientes. No requiere migración nueva.

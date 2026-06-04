@@ -166,6 +166,7 @@ export function exportReconciliationXlsx(rows, fileName = 'conciliacion-inventar
   const exportRows = rows.map((row) => {
     const { fecha, hora } = splitDateTime(row.counted_at);
     return {
+      Campaña: row.campaign_name || '',
       'Codigo de material': row.material_code,
       'Descripción del Articulo': row.material_name,
       'Descripcion en Chino': row.material_name_cn || '',

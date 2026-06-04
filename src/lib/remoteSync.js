@@ -1,14 +1,17 @@
 import {
+  listPendingDeletedRecords,
   listPendingFoundItems,
   listPendingGroupCounts,
   listPendingLocations,
   markRecordsSynced,
+  clearDeletedRecords,
   replaceAppUsers,
   saveAuthorizedUsers,
   saveCampaigns,
   saveFoundItems,
   saveGroupCounts,
   saveLocations,
+  pruneSyncedFoundItemsMissingFromRemote,
   saveSnapshotItems
 } from './db.js';
 import { isSupabaseConfigured, supabase } from './supabaseClient.js';
@@ -38,6 +41,17 @@ async function updateInChunks(table, rows) {
     const { error } = await supabase.from(table).update(patch).eq('id', id);
     if (error) throw new Error(`${table}: ${error.message}`);
     total += 1;
+  }
+  return total;
+}
+
+async function deleteInChunks(table, ids) {
+  if (!ids?.length) return 0;
+  let total = 0;
+  for (const chunk of chunkRows(ids, 250)) {
+    const { error } = await supabase.from(table).delete().in('id', chunk);
+    if (error) throw new Error(`${table}: ${error.message}`);
+    total += chunk.length;
   }
   return total;
 }
@@ -96,10 +110,11 @@ export async function syncPendingChanges(user) {
   if (!isSupabaseConfigured) return { ok: false, message: 'Supabase no está configurado.' };
 
   try {
-    const [pendingGroups, pendingFound, pendingLocations] = await Promise.all([
+    const [pendingGroups, pendingFound, pendingLocations, pendingDeletes] = await Promise.all([
       listPendingGroupCounts(),
       listPendingFoundItems(),
-      listPendingLocations()
+      listPendingLocations(),
+      listPendingDeletedRecords()
     ]);
 
     const groupPayload = pendingGroups.map(({ sync_status, created_at, ...row }) => ({
@@ -115,6 +130,10 @@ export async function syncPendingChanges(user) {
     }));
 
     const locationPayload = pendingLocations.map(stripLocalFields);
+    const foundDeleteIds = pendingDeletes
+      .filter((row) => row.table === 'found_items')
+      .map((row) => row.record_id)
+      .filter(Boolean);
 
     // Admin puede crear/actualizar ubicaciones. El contador solo actualiza estado
     // de ubicaciones existentes para evitar errores de RLS por intentos de INSERT.
@@ -123,14 +142,16 @@ export async function syncPendingChanges(user) {
       : await updateInChunks('campaign_locations', locationPayload);
     const syncedGroups = await upsertInChunks('group_counts', groupPayload, { onConflict: 'id' });
     const syncedFound = await upsertInChunks('found_items', foundPayload, { onConflict: 'id' });
+    const deletedFound = await deleteInChunks('found_items', foundDeleteIds);
 
     await markRecordsSynced('locations', pendingLocations.map((row) => row.id));
     await markRecordsSynced('group_counts', pendingGroups.map((row) => row.id));
     await markRecordsSynced('found_items', pendingFound.map((row) => row.id));
+    await clearDeletedRecords(pendingDeletes.map((row) => row.id));
 
     return {
       ok: true,
-      message: `Sincronización lista. Conteos: ${syncedGroups}, nuevos: ${syncedFound}, ubicaciones: ${syncedLocations}.`
+      message: `Sincronización lista. Conteos: ${syncedGroups}, nuevos: ${syncedFound}, eliminados: ${deletedFound}, ubicaciones: ${syncedLocations}.`
     };
   } catch (error) {
     return { ok: false, message: error.message };
@@ -141,14 +162,15 @@ export async function pullFromSupabase() {
   if (!isSupabaseConfigured) return { ok: false, message: 'Supabase no está configurado.' };
 
   try {
-    const [profiles, authorizedUsers, campaigns, locations, snapshot, groupCounts, foundItems] = await Promise.all([
+    const [profiles, authorizedUsers, campaigns, locations, snapshot, groupCounts, foundItems, pendingDeletes] = await Promise.all([
       selectAll('profiles', 'id, full_name, email, role, active, created_at, updated_at'),
       selectAll('authorized_users', 'id, full_name, email, role, active, claimed_by, claimed_at, created_at, updated_at'),
       selectAll('campaigns'),
       selectAll('campaign_locations'),
       selectAll('inventory_snapshot'),
       selectAll('group_counts'),
-      selectAll('found_items')
+      selectAll('found_items'),
+      listPendingDeletedRecords()
     ]);
 
     await replaceAppUsers(profiles.map((profile) => ({
@@ -166,11 +188,22 @@ export async function pullFromSupabase() {
     await saveLocations(locations.map((row) => ({ ...row, sync_status: 'synced' })));
     await saveSnapshotItems(snapshot.map((row) => ({ ...row, sync_status: 'synced' })));
     await saveGroupCounts(groupCounts.map((row) => ({ ...row, sync_status: 'synced' })), { preservePending: true });
-    await saveFoundItems(foundItems.map((row) => ({ ...row, sync_status: 'synced' })), { preservePending: true });
+    const locallyDeletedIds = new Set(pendingDeletes.filter((row) => row.table === 'found_items').map((row) => row.record_id));
+    await saveFoundItems(
+      foundItems
+        .filter((row) => !locallyDeletedIds.has(row.id))
+        .map((row) => ({ ...row, sync_status: 'synced' })),
+      { preservePending: true }
+    );
+
+    const remoteFoundIds = new Set(foundItems.map((row) => row.id));
+    const prunedFoundItems = await pruneSyncedFoundItemsMissingFromRemote(remoteFoundIds, {
+      excludeIds: locallyDeletedIds
+    });
 
     return {
       ok: true,
-      message: `Datos actualizados desde Supabase. Usuarios autorizados: ${authorizedUsers.length}, campañas: ${campaigns.length}, ubicaciones: ${locations.length}, base: ${snapshot.length}.`
+      message: `Datos actualizados desde Supabase. Usuarios autorizados: ${authorizedUsers.length}, campañas: ${campaigns.length}, ubicaciones: ${locations.length}, base: ${snapshot.length}, nuevos limpiados: ${prunedFoundItems}.`
     };
   } catch (error) {
     return { ok: false, message: error.message };

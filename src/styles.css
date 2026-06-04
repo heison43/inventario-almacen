@@ -386,3 +386,81 @@ tr:hover td { background: #f8fafc; }
 .collapsible-zone:last-child {
   border-bottom: 0;
 }
+
+/* v12 - mejoras de operación en inventario real */
+tr:hover td { background: #eef4fb; }
+tr.selected-row td { background: #dbeafe !important; box-shadow: inset 0 1px 0 rgba(2,132,199,.12), inset 0 -1px 0 rgba(2,132,199,.12); }
+tr.selected-row td:first-child { box-shadow: inset 4px 0 0 #0284c7; }
+.danger-mini-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 12px;
+  padding: 8px 10px;
+  font-weight: 800;
+  cursor: pointer;
+  background: #fee2e2;
+  color: #991b1b;
+}
+.danger-mini-button:hover { background: #fecaca; }
+.found-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(140px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed #cbd5e1;
+}
+.found-edit-grid label { font-size: .78rem; color: #475569; font-weight: 800; }
+.found-edit-grid input { margin-top: 4px; padding: 9px 10px; }
+.ghost-light-button {
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1e40af;
+  border-radius: 14px;
+  padding: 10px 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.campaign-picker {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 14px;
+  margin: 12px 0;
+}
+.campaign-checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+  max-height: 260px;
+  overflow: auto;
+}
+.campaign-check-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 10px 12px;
+}
+.campaign-check-card input { width: auto; margin-top: 3px; }
+.campaign-check-card span { display: grid; gap: 2px; }
+.campaign-check-card small { color: var(--muted); font-weight: 650; }
+.location-card.group-11 { border-left: 7px solid #0891b2; background: #ecfeff; }
+.location-card.group-12 { border-left: 7px solid #ca8a04; background: #fefce8; }
+.location-card.group-13 { border-left: 7px solid #be123c; background: #fff1f2; }
+.location-card.group-14 { border-left: 7px solid #4338ca; background: #eef2ff; }
+.location-card.group-15 { border-left: 7px solid #15803d; background: #f0fdf4; }
+.location-card.group-16 { border-left: 7px solid #c2410c; background: #fff7ed; }
+.location-card.group-17 { border-left: 7px solid #0f766e; background: #f0fdfa; }
+.location-card.group-18 { border-left: 7px solid #a21caf; background: #fdf4ff; }
+.location-card.group-19 { border-left: 7px solid #0369a1; background: #f0f9ff; }
+.location-card.group-20 { border-left: 7px solid #475569; background: #f8fafc; }
+@media (max-width: 980px) {
+  .found-edit-grid { grid-template-columns: 1fr; }
+}

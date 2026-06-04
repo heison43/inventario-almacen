@@ -5,7 +5,8 @@ import { isSupabaseConfigured } from '../lib/supabaseClient.js';
 import { pullFromSupabase } from '../lib/remoteSync.js';
 import { statusLabel } from '../lib/utils.js';
 
-const GROUPS = Array.from({ length: 10 }, (_, index) => `grupo${index + 1}`);
+const GROUPS = Array.from({ length: 20 }, (_, index) => `grupo${index + 1}`);
+const FILTER_STORAGE_KEY = 'inventario-almacen-counter-filters';
 
 function groupClass(group) {
   const match = String(group || '').match(/grupo(\d+)/i);
@@ -15,16 +16,26 @@ function groupClass(group) {
 export default function CounterDashboard({ user, onOpenCount }) {
   const [campaigns, setCampaigns] = useState([]);
   const [counters, setCounters] = useState([]);
-  const [showOnlyAssigned, setShowOnlyAssigned] = useState(true);
-  const [selectedGroup, setSelectedGroup] = useState('todos');
-  const [selectedUser, setSelectedUser] = useState('todos');
+  const savedFilters = (() => {
+    try {
+      return JSON.parse(localStorage.getItem(FILTER_STORAGE_KEY) || '{}');
+    } catch {
+      return {};
+    }
+  })();
+  const [showOnlyAssigned, setShowOnlyAssigned] = useState(savedFilters.showOnlyAssigned ?? true);
+  const [selectedGroup, setSelectedGroup] = useState(savedFilters.selectedGroup || 'todos');
+  const [selectedUser, setSelectedUser] = useState(savedFilters.selectedUser || 'todos');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [collapsedCampaigns, setCollapsedCampaigns] = useState({});
 
   const isAdmin = user?.role === 'admin';
 
-  useEffect(() => { refresh(); }, [showOnlyAssigned, selectedGroup, selectedUser]);
+  useEffect(() => {
+    localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify({ showOnlyAssigned, selectedGroup, selectedUser }));
+    refresh();
+  }, [showOnlyAssigned, selectedGroup, selectedUser]);
 
   async function refresh() {
     setLoading(true);
@@ -100,6 +111,9 @@ export default function CounterDashboard({ user, onOpenCount }) {
             </select>
           </label>
 
+          {selectedGroup !== 'todos' && (
+            <button className="ghost-light-button" type="button" onClick={() => setSelectedGroup('todos')}>Ver todos los grupos</button>
+          )}
           <button className="secondary-button" onClick={refresh} disabled={loading}><RefreshCw size={16} /> {loading ? 'Actualizando...' : 'Actualizar'}</button>
         </div>
       </div>

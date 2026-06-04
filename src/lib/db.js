@@ -2,7 +2,7 @@ import { openDB } from 'idb';
 import { uid } from './utils.js';
 
 const DB_NAME = 'inventario-almacen-db';
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 
 export const DEFAULT_LOCAL_USERS = [
   { id: 'usr_admin_demo', name: 'Heison Yepes', email: 'heison@empresa.com', role: 'admin', active: true, sync_status: 'local' },
@@ -63,7 +63,13 @@ function createBaseStores(db, transaction) {
   ensureIndex(authorizedUsers, 'email', 'email', { unique: true });
   ensureIndex(authorizedUsers, 'role', 'role');
   ensureIndex(authorizedUsers, 'active', 'active');
+
+  // Cola local para eliminar registros ya sincronizados cuando el usuario trabaja offline.
+  const deletedRecords = getOrCreateStore(db, transaction, 'deleted_records', { keyPath: 'id' });
+  ensureIndex(deletedRecords, 'table', 'table');
+  ensureIndex(deletedRecords, 'sync_status', 'sync_status');
 }
+
 
 export async function getDB() {
   return openDB(DB_NAME, DB_VERSION, {
@@ -413,9 +419,74 @@ export async function listFoundItemsByLocation(locationId) {
   return db.getAllFromIndex('found_items', 'location_id', locationId);
 }
 
+
+
+export async function pruneSyncedFoundItemsMissingFromRemote(remoteIds, { excludeIds = [] } = {}) {
+  const remoteSet = remoteIds instanceof Set ? remoteIds : new Set(remoteIds || []);
+  const excludeSet = excludeIds instanceof Set ? excludeIds : new Set(excludeIds || []);
+  const db = await getDB();
+  const tx = db.transaction('found_items', 'readwrite');
+  const rows = await tx.store.getAll();
+  let deleted = 0;
+
+  await Promise.all(rows.map(async (row) => {
+    // Protección crítica: nunca eliminar registros creados/editados localmente
+    // que todavía no han sido sincronizados. Solo se limpian registros que
+    // ya estaban en estado synced y desaparecieron de Supabase.
+    if (row?.sync_status === 'synced' && !remoteSet.has(row.id) && !excludeSet.has(row.id)) {
+      await tx.store.delete(row.id);
+      deleted += 1;
+    }
+  }));
+
+  await tx.done;
+  return deleted;
+}
+
+export async function deleteFoundItem(id, { queueRemote = true } = {}) {
+  const db = await getDB();
+  const tx = db.transaction(['found_items', 'deleted_records'], 'readwrite');
+  const foundStore = tx.objectStore('found_items');
+  const deletedStore = tx.objectStore('deleted_records');
+  const current = await foundStore.get(id);
+  if (!current) {
+    await tx.done;
+    return null;
+  }
+
+  // Si el registro ya pudo haber llegado a Supabase, dejamos una marca local
+  // para que la siguiente sincronización lo elimine también en la nube.
+  if (queueRemote) {
+    await deletedStore.put({
+      id: `found_items::${id}`,
+      table: 'found_items',
+      record_id: id,
+      sync_status: 'pending',
+      created_at: new Date().toISOString()
+    });
+  }
+
+  await foundStore.delete(id);
+  await tx.done;
+  return current;
+}
+
+export async function listPendingDeletedRecords() {
+  const db = await getDB();
+  return db.getAllFromIndex('deleted_records', 'sync_status', 'pending');
+}
+
+export async function clearDeletedRecords(ids) {
+  if (!ids?.length) return;
+  const db = await getDB();
+  const tx = db.transaction('deleted_records', 'readwrite');
+  await Promise.all(ids.map((id) => tx.store.delete(id)));
+  await tx.done;
+}
+
 export async function clearLocalDatabase() {
   const db = await getDB();
-  const stores = ['campaigns', 'locations', 'snapshot', 'counts', 'group_counts', 'found_items'];
+  const stores = ['campaigns', 'locations', 'snapshot', 'counts', 'group_counts', 'found_items', 'deleted_records'];
   const tx = db.transaction(stores, 'readwrite');
   await Promise.all(stores.map((store) => tx.objectStore(store).clear()));
   await tx.done;

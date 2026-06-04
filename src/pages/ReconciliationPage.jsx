@@ -8,7 +8,8 @@ import { pullFromSupabase } from '../lib/remoteSync.js';
 
 export default function ReconciliationPage({ selectedCampaignId }) {
   const [campaigns, setCampaigns] = useState([]);
-  const [campaignId, setCampaignId] = useState(selectedCampaignId || '');
+  const [campaignMode, setCampaignMode] = useState(selectedCampaignId ? 'selected' : 'all');
+  const [selectedCampaignIds, setSelectedCampaignIds] = useState(selectedCampaignId ? [selectedCampaignId] : []);
   const [rows, setRows] = useState([]);
   const [summary, setSummary] = useState({});
   const [statusFilter, setStatusFilter] = useState('todos');
@@ -19,32 +20,97 @@ export default function ReconciliationPage({ selectedCampaignId }) {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => { loadCampaigns(); }, []);
-  useEffect(() => { if (selectedCampaignId) setCampaignId(selectedCampaignId); }, [selectedCampaignId]);
-  useEffect(() => { if (campaignId) loadReconciliation(campaignId); }, [campaignId]);
+
+  useEffect(() => {
+    if (selectedCampaignId) {
+      setCampaignMode('selected');
+      setSelectedCampaignIds([selectedCampaignId]);
+    }
+  }, [selectedCampaignId]);
+
+  const activeCampaignIds = useMemo(() => {
+    if (campaignMode === 'all') return campaigns.map((campaign) => campaign.id);
+    return selectedCampaignIds;
+  }, [campaignMode, campaigns, selectedCampaignIds]);
+
+  useEffect(() => {
+    if (campaigns.length) loadReconciliation(activeCampaignIds);
+  }, [campaigns, activeCampaignIds.join('|')]);
 
   async function loadCampaigns() {
-    if (isSupabaseConfigured) {
-      const pulled = await pullFromSupabase();
-      if (!pulled.ok) setMessage(`Aviso Supabase: ${pulled.message}`);
-    }
-    const rows = await listCampaigns();
-    setCampaigns(rows);
-    if (!campaignId && rows[0]) setCampaignId(rows[0].id);
-  }
-
-  async function loadReconciliation(id = campaignId) {
-    if (!id) return;
     setLoading(true);
     if (isSupabaseConfigured) {
       const pulled = await pullFromSupabase();
       if (!pulled.ok) setMessage(`Aviso Supabase: ${pulled.message}`);
     }
-    const [result, campaignLocations] = await Promise.all([buildReconciliation(id), listLocations(id)]);
-    setRows(result.rows);
-    setSummary(result.summary);
-    setLocations(campaignLocations);
+    const campaignRows = await listCampaigns();
+    setCampaigns(campaignRows);
+    if (!selectedCampaignId && !selectedCampaignIds.length) {
+      setCampaignMode('all');
+    }
+    setLoading(false);
+  }
+
+  async function loadReconciliation(ids = activeCampaignIds) {
+    const validIds = (ids || []).filter(Boolean);
+    if (!validIds.length) {
+      setRows([]);
+      setSummary({ total: 0, ok: 0, faltante: 0, sobrante: 0, pendiente: 0, encontrado: 0 });
+      setLocations([]);
+      return;
+    }
+
+    setLoading(true);
+    if (isSupabaseConfigured) {
+      const pulled = await pullFromSupabase();
+      if (!pulled.ok) setMessage(`Aviso Supabase: ${pulled.message}`);
+    }
+
+    const campaignMap = new Map(campaigns.map((campaign) => [campaign.id, campaign]));
+    const results = await Promise.all(validIds.map(async (id) => {
+      const [result, campaignLocations] = await Promise.all([buildReconciliation(id), listLocations(id)]);
+      const campaign = campaignMap.get(id);
+      return {
+        id,
+        rows: result.rows.map((row) => ({
+          ...row,
+          campaign_id: id,
+          campaign_name: campaign?.name || id
+        })),
+        locations: campaignLocations
+      };
+    }));
+
+    const allRows = results.flatMap((result) => result.rows);
+    const allLocations = results.flatMap((result) => result.locations);
+    const uniqueLocations = Array.from(new Set(allLocations.map((location) => location.location))).sort();
+
+    const nextSummary = allRows.reduce(
+      (acc, row) => {
+        acc.total += 1;
+        acc[row.status] = (acc[row.status] || 0) + 1;
+        return acc;
+      },
+      { total: 0, ok: 0, faltante: 0, sobrante: 0, pendiente: 0, encontrado: 0 }
+    );
+
+    setRows(allRows);
+    setSummary(nextSummary);
+    setLocations(uniqueLocations);
     setLocationFilter('todos');
     setLoading(false);
+  }
+
+  function toggleCampaign(campaignId) {
+    setSelectedCampaignIds((current) => {
+      if (current.includes(campaignId)) return current.filter((id) => id !== campaignId);
+      return [...current, campaignId];
+    });
+  }
+
+  function selectCurrentCampaigns(ids) {
+    setCampaignMode('selected');
+    setSelectedCampaignIds(ids);
   }
 
   const filteredRows = useMemo(() => {
@@ -52,7 +118,7 @@ export default function ReconciliationPage({ selectedCampaignId }) {
     return rows.filter((row) => {
       const statusOk = statusFilter === 'todos' || row.status === statusFilter;
       const locationOk = locationFilter === 'todos' || row.location === locationFilter;
-      const queryOk = !q || [row.material_code, row.material_name, row.material_name_cn, row.location, row.warehouse, row.zone, row.department]
+      const queryOk = !q || [row.campaign_name, row.material_code, row.material_name, row.material_name_cn, row.location, row.warehouse, row.zone, row.department]
         .join(' ')
         .toLowerCase()
         .includes(q);
@@ -65,10 +131,10 @@ export default function ReconciliationPage({ selectedCampaignId }) {
       <div className="section-title">
         <div>
           <h2>Conciliación de inventario</h2>
-          <p>Comparativo por código totalizado en cada ubicación. La exportación sale con los campos definidos para cierre del conteo.</p>
+          <p>Comparativo por código totalizado en cada ubicación. Puedes exportar todas las campañas o solo las seleccionadas.</p>
         </div>
         <div className="button-row">
-          <button className="secondary-button" onClick={() => loadReconciliation()} disabled={loading}><RefreshCw size={16} /> {loading ? 'Actualizando...' : 'Actualizar'}</button>
+          <button className="secondary-button" onClick={loadCampaigns} disabled={loading}><RefreshCw size={16} /> {loading ? 'Actualizando...' : 'Actualizar'}</button>
           <button className="primary-button" onClick={() => exportReconciliationXlsx(filteredRows)}><Download size={16} /> Exportar Excel</button>
         </div>
       </div>
@@ -77,17 +143,17 @@ export default function ReconciliationPage({ selectedCampaignId }) {
 
       <div className="form-grid three-cols">
         <label>
-          Campaña
-          <select value={campaignId} onChange={(e) => setCampaignId(e.target.value)}>
-            <option value="">Seleccionar campaña</option>
-            {campaigns.map((campaign) => <option key={campaign.id} value={campaign.id}>{campaign.name}</option>)}
+          Modo de campañas
+          <select value={campaignMode} onChange={(e) => setCampaignMode(e.target.value)}>
+            <option value="all">Todas las campañas</option>
+            <option value="selected">Campañas seleccionadas</option>
           </select>
         </label>
         <label>
           Ubicación
           <select value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)}>
             <option value="todos">Todas</option>
-            {locations.map((location) => <option key={location.id} value={location.location}>{location.location}</option>)}
+            {locations.map((location) => <option key={location} value={location}>{location}</option>)}
           </select>
         </label>
         <label>
@@ -103,9 +169,33 @@ export default function ReconciliationPage({ selectedCampaignId }) {
         </label>
         <label>
           Buscar
-          <div className="input-with-icon"><Search size={16} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Código, material o ubicación..." /></div>
+          <div className="input-with-icon"><Search size={16} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Código, material, campaña o ubicación..." /></div>
         </label>
       </div>
+
+      {campaignMode === 'selected' && (
+        <div className="campaign-picker">
+          <div className="button-row">
+            <button className="secondary-button" type="button" onClick={() => selectCurrentCampaigns(campaigns.map((campaign) => campaign.id))}>Seleccionar todas</button>
+            <button className="secondary-button" type="button" onClick={() => selectCurrentCampaigns([])}>Quitar selección</button>
+          </div>
+          <div className="campaign-checkbox-grid">
+            {campaigns.map((campaign) => (
+              <label key={campaign.id} className="campaign-check-card">
+                <input
+                  type="checkbox"
+                  checked={selectedCampaignIds.includes(campaign.id)}
+                  onChange={() => toggleCampaign(campaign.id)}
+                />
+                <span>
+                  <strong>{campaign.name}</strong>
+                  <small>{campaign.warehouse} · Zona {campaign.zone}</small>
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="stats-grid six-cols">
         <Stat label="Total códigos" value={summary.total || 0} />
@@ -120,6 +210,7 @@ export default function ReconciliationPage({ selectedCampaignId }) {
         <table>
           <thead>
             <tr>
+              <th>Campaña</th>
               <th>Almacén</th>
               <th>Zona</th>
               <th>Ubicación</th>
@@ -140,7 +231,8 @@ export default function ReconciliationPage({ selectedCampaignId }) {
           </thead>
           <tbody>
             {filteredRows.map((row, index) => (
-              <tr key={`${row.material_code}-${row.batch}-${row.location}-${index}`}>
+              <tr key={`${row.campaign_id}-${row.material_code}-${row.batch}-${row.location}-${index}`}>
+                <td>{row.campaign_name || ''}</td>
                 <td>{row.warehouse}</td>
                 <td>{row.zone}</td>
                 <td>{row.location}</td>

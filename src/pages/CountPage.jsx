@@ -1,9 +1,10 @@
-import { ArrowLeft, CheckCircle2, ChevronDown, ChevronRight, Download, Plus, Search, X } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, ChevronDown, ChevronRight, Download, Plus, Search, Trash2, X } from 'lucide-react';
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import {
   buildGroupCountId,
   getCampaign,
   getLocation,
+  deleteFoundItem,
   listFoundItemsByLocation,
   listGroupCountsByLocation,
   listSnapshotByLocation,
@@ -91,6 +92,7 @@ function groupSnapshotRows(snapshots, groupCounts, foundItems) {
     raw_lines: 0,
     lots: [{ batch: item.batch || 'S/L', system_qty: 0, raw_lines: 0 }],
     is_found: true,
+    found_record: item,
     count: {
       physical_qty: item.physical_qty,
       status: 'encontrado',
@@ -115,6 +117,7 @@ export default function CountPage({ user, campaignId, locationId, onBack }) {
   const [message, setMessage] = useState('');
   const [showFoundForm, setShowFoundForm] = useState(false);
   const [expanded, setExpanded] = useState({});
+  const [selectedRowId, setSelectedRowId] = useState('');
   const [foundForm, setFoundForm] = useState({
     material_code: '',
     material_name: '',
@@ -225,6 +228,34 @@ export default function CountPage({ user, campaignId, locationId, onBack }) {
     setShowFoundForm(false);
     setMessage('Código nuevo agregado con cantidad sistema 0. Quedará como encontrado físico en conciliación.');
     await load();
+  }
+
+
+  async function updateFoundItem(item, changes) {
+    if (!item.is_found || !item.found_record) return;
+    const current = item.found_record;
+    const updated = await saveFoundItem({
+      ...current,
+      ...changes,
+      physical_qty: changes.physical_qty !== undefined
+        ? (changes.physical_qty === '' ? 0 : toNumber(changes.physical_qty))
+        : Number(current.physical_qty || 0),
+      condition_qty: changes.condition_qty !== undefined
+        ? (changes.condition_qty === '' ? 0 : toNumber(changes.condition_qty))
+        : Number(current.condition_qty || 0),
+      comment: changes.comment !== undefined ? String(changes.comment || '') : (current.comment || '')
+    });
+
+    setFoundItems((currentRows) => currentRows.map((row) => (row.id === updated.id ? updated : row)));
+  }
+
+  async function removeFoundItem(item) {
+    if (!item.is_found || !item.id) return;
+    const ok = window.confirm(`¿Eliminar el código nuevo ${item.material_code}? Esta acción se sincronizará con Supabase.`);
+    if (!ok) return;
+    await deleteFoundItem(item.id);
+    setFoundItems((currentRows) => currentRows.filter((row) => row.id !== item.id));
+    setMessage('Código nuevo eliminado. Recuerda sincronizar para aplicar el cambio en Supabase.');
   }
 
   async function finishLocation() {
@@ -364,6 +395,7 @@ export default function CountPage({ user, campaignId, locationId, onBack }) {
               <th>Comentario</th>
               <th>Diferencia</th>
               <th>Estado</th>
+              <th>Acción</th>
             </tr>
           </thead>
           <tbody>
@@ -374,9 +406,9 @@ export default function CountPage({ user, campaignId, locationId, onBack }) {
               const isOpen = Boolean(expanded[item.id]);
               return (
                 <Fragment key={item.id}>
-                  <tr>
+                  <tr className={selectedRowId === item.id ? 'selected-row' : ''} onClick={() => setSelectedRowId(item.id)}>
                     <td>
-                      <button className="icon-button detail-toggle" onClick={() => setExpanded((current) => ({ ...current, [item.id]: !current[item.id] }))} title="Ver detalle de lotes">
+                      <button className="icon-button detail-toggle" onClick={(event) => { event.stopPropagation(); setExpanded((current) => ({ ...current, [item.id]: !current[item.id] })); }} title="Ver detalle de lotes">
                         {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                       </button>
                     </td>
@@ -392,16 +424,18 @@ export default function CountPage({ user, campaignId, locationId, onBack }) {
                         type="number"
                         step="0.001"
                         value={physical ?? ''}
-                        disabled={item.is_found}
-                        onChange={(e) => saveGroupChange(item, { physical_qty: e.target.value })}
+                        onClick={(event) => event.stopPropagation()}
+                        onFocus={() => setSelectedRowId(item.id)}
+                        onChange={(e) => item.is_found ? updateFoundItem(item, { physical_qty: e.target.value }) : saveGroupChange(item, { physical_qty: e.target.value })}
                       />
                     </td>
                     <td>
                       <select
                         className="compact-select"
                         value={item.count?.material_condition || 'buen_estado'}
-                        disabled={item.is_found}
-                        onChange={(e) => saveGroupChange(item, { material_condition: e.target.value })}
+                        onClick={(event) => event.stopPropagation()}
+                        onFocus={() => setSelectedRowId(item.id)}
+                        onChange={(e) => item.is_found ? updateFoundItem(item, { material_condition: e.target.value }) : saveGroupChange(item, { material_condition: e.target.value })}
                       >
                         {MATERIAL_CONDITIONS.map((condition) => <option key={condition.value} value={condition.value}>{condition.label}</option>)}
                       </select>
@@ -412,26 +446,35 @@ export default function CountPage({ user, campaignId, locationId, onBack }) {
                         type="number"
                         step="0.001"
                         value={item.count?.condition_qty ?? ''}
-                        disabled={item.is_found}
-                        onChange={(e) => saveGroupChange(item, { condition_qty: e.target.value === '' ? 0 : Number(e.target.value) })}
+                        onClick={(event) => event.stopPropagation()}
+                        onFocus={() => setSelectedRowId(item.id)}
+                        onChange={(e) => item.is_found ? updateFoundItem(item, { condition_qty: e.target.value }) : saveGroupChange(item, { condition_qty: e.target.value === '' ? 0 : Number(e.target.value) })}
                       />
                     </td>
                     <td>
                       <input
                         className="comment-input"
                         value={item.count?.comment || ''}
-                        disabled={item.is_found}
-                        onChange={(e) => saveGroupChange(item, { comment: e.target.value })}
+                        onClick={(event) => event.stopPropagation()}
+                        onFocus={() => setSelectedRowId(item.id)}
+                        onChange={(e) => item.is_found ? updateFoundItem(item, { comment: e.target.value }) : saveGroupChange(item, { comment: e.target.value })}
                         placeholder="Comentario"
                       />
                     </td>
                     <td>{diff === '' ? '' : formatNumber(diff)}</td>
                     <td><span className={`status-pill ${status}`}>{statusLabel(status)}</span></td>
+                    <td>
+                      {item.is_found ? (
+                        <button className="danger-mini-button" type="button" onClick={(event) => { event.stopPropagation(); removeFoundItem(item); }}>
+                          <Trash2 size={14} /> Borrar
+                        </button>
+                      ) : '—'}
+                    </td>
                   </tr>
                   {isOpen && (
                     <tr className="detail-row">
                       <td></td>
-                      <td colSpan="12">
+                      <td colSpan="13">
                         <div className="lot-detail">
                           <strong>Detalle por lote en esta ubicación</strong>
                           <div className="lot-chip-list">
@@ -441,6 +484,15 @@ export default function CountPage({ user, campaignId, locationId, onBack }) {
                               </span>
                             ))}
                           </div>
+                          {item.is_found && (
+                            <div className="found-edit-grid" onClick={(event) => event.stopPropagation()}>
+                              <label>Código<input value={item.found_record?.material_code || ''} onChange={(e) => updateFoundItem(item, { material_code: e.target.value.trim() })} /></label>
+                              <label>Descripción<input value={item.found_record?.material_name || ''} onChange={(e) => updateFoundItem(item, { material_name: e.target.value })} /></label>
+                              <label>Descripción en chino<input value={item.found_record?.material_name_cn || ''} onChange={(e) => updateFoundItem(item, { material_name_cn: e.target.value })} /></label>
+                              <label>UM<input value={item.found_record?.unit || ''} onChange={(e) => updateFoundItem(item, { unit: e.target.value })} /></label>
+                              <label>Lote<input value={item.found_record?.batch || 'S/L'} onChange={(e) => updateFoundItem(item, { batch: e.target.value || 'S/L' })} /></label>
+                            </div>
+                          )}
                         </div>
                       </td>
                     </tr>

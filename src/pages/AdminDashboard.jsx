@@ -6,7 +6,7 @@ import { deriveZoneFromLocation, formatNumber, statusLabel } from '../lib/utils.
 import { isSupabaseConfigured } from '../lib/supabaseClient.js';
 import { pullFromSupabase, pushCampaignBundle, syncPendingChanges } from '../lib/remoteSync.js';
 
-const GROUPS = Array.from({ length: 10 }, (_, index) => `grupo${index + 1}`);
+const GROUPS = Array.from({ length: 20 }, (_, index) => `grupo${index + 1}`);
 const visibleMappingFields = ['material_code', 'material_name', 'material_name_cn', 'unit', 'system_qty', 'location', 'department', 'warehouse'];
 const technicalMappingFields = ['batch', 'purchase_order', 'unit_price', 'total_value'];
 
@@ -31,9 +31,9 @@ export default function AdminDashboard({ user, onOpenReconciliation }) {
   const [counters, setCounters] = useState([]);
   const [fileInfo, setFileInfo] = useState(null);
   const [mapping, setMapping] = useState({});
-  const [campaignName, setCampaignName] = useState('Inventario zona 2H01H02');
+  const [campaignName, setCampaignName] = useState('Inventario zona');
   const [warehouse, setWarehouse] = useState('Higabra');
-  const [zone, setZone] = useState('2H01H02');
+  const [zone, setZone] = useState('');
   const [filterByZone, setFilterByZone] = useState(true);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -87,6 +87,10 @@ export default function AdminDashboard({ user, onOpenReconciliation }) {
     }
     if (requiredMissing.length) {
       setMessage(`Faltan columnas obligatorias: ${requiredMissing.map((field) => field.label).join(', ')}. Revisa la sección técnica del mapeo.`);
+      return;
+    }
+    if (filterByZone && !normalizedZone) {
+      setMessage('Ingresa la zona a contar antes de crear la campaña. Esto evita crear campañas vacías por error.');
       return;
     }
     setLoading(true);
@@ -151,7 +155,7 @@ export default function AdminDashboard({ user, onOpenReconciliation }) {
           </label>
           <label>
             Zona a contar
-            <input value={zone} onChange={(e) => setZone(e.target.value)} placeholder="Ejemplo: 2H01H02" />
+            <input value={zone} onChange={(e) => setZone(e.target.value)} placeholder="Obligatorio. Ejemplo: 2H01H02" />
             <small>Zona normalizada: {normalizedZone || '—'}</small>
           </label>
         </div>
