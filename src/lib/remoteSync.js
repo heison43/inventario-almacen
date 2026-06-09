@@ -12,11 +12,13 @@ import {
   saveGroupCounts,
   saveLocations,
   pruneSyncedFoundItemsMissingFromRemote,
-  saveSnapshotItems
+  saveSnapshotItems,
+  deleteLocalCampaignCascade
 } from './db.js';
 import { isSupabaseConfigured, supabase } from './supabaseClient.js';
 
 const PAGE_SIZE = 1000;
+const IN_FILTER_CHUNK = 120;
 
 function chunkRows(rows, size = 500) {
   const chunks = [];
@@ -26,6 +28,9 @@ function chunkRows(rows, size = 500) {
   return chunks;
 }
 
+function unique(values) {
+  return Array.from(new Set((values || []).filter(Boolean)));
+}
 
 function stripLocalFields(row) {
   const { sync_status, ...clean } = row || {};
@@ -83,6 +88,28 @@ async function selectAll(table, columns = '*', applyFilters) {
   }
 
   return allRows;
+}
+
+async function selectAllByLocationIds(table, locationIds, columns = '*') {
+  const ids = unique(locationIds);
+  if (!ids.length) return [];
+  const results = [];
+
+  for (const idChunk of chunkRows(ids, IN_FILTER_CHUNK)) {
+    const rows = await selectAll(table, columns, (query) => query.in('location_id', idChunk));
+    results.push(...rows);
+  }
+
+  return results;
+}
+
+function allowedLocationsForUser(locations, user) {
+  if (!user?.email || user?.role === 'admin') return locations || [];
+  const email = String(user.email || '').trim().toLowerCase();
+  return (locations || []).filter((location) => {
+    const assigned = String(location.assigned_to || '').trim().toLowerCase();
+    return !assigned || assigned === email;
+  });
 }
 
 export async function pushCampaignBundle({ campaign, locations, snapshotItems }) {
@@ -158,21 +185,48 @@ export async function syncPendingChanges(user) {
   }
 }
 
-export async function pullFromSupabase() {
-  if (!isSupabaseConfigured) return { ok: false, message: 'Supabase no está configurado.' };
+
+async function countRows(table, applyFilters) {
+  let query = supabase.from(table).select('id', { count: 'exact', head: true });
+  if (applyFilters) query = applyFilters(query);
+  const { count, error } = await query;
+  if (error) throw new Error(`${table}: ${error.message}`);
+  return count || 0;
+}
+
+export async function deleteCampaignEverywhere(campaignId, { allowWithCounts = false } = {}) {
+  if (!campaignId) return { ok: false, message: 'No se recibió campaña para eliminar.' };
 
   try {
-    const [profiles, authorizedUsers, campaigns, locations, snapshot, groupCounts, foundItems, pendingDeletes] = await Promise.all([
-      selectAll('profiles', 'id, full_name, email, role, active, created_at, updated_at'),
-      selectAll('authorized_users', 'id, full_name, email, role, active, claimed_by, claimed_at, created_at, updated_at'),
-      selectAll('campaigns'),
-      selectAll('campaign_locations'),
-      selectAll('inventory_snapshot'),
-      selectAll('group_counts'),
-      selectAll('found_items'),
-      listPendingDeletedRecords()
-    ]);
+    if (isSupabaseConfigured) {
+      const [countedRows, foundRows] = await Promise.all([
+        countRows('group_counts', (query) => query.eq('campaign_id', campaignId)),
+        countRows('found_items', (query) => query.eq('campaign_id', campaignId))
+      ]);
 
+      if (!allowWithCounts && (countedRows > 0 || foundRows > 0)) {
+        return {
+          ok: false,
+          message: `No se eliminó la campaña porque ya tiene conteos o códigos nuevos sincronizados. Conteos: ${countedRows}, nuevos: ${foundRows}.`
+        };
+      }
+
+      const { error } = await supabase.from('campaigns').delete().eq('id', campaignId);
+      if (error) throw new Error(`campaigns: ${error.message}`);
+    }
+
+    const local = await deleteLocalCampaignCascade(campaignId);
+    return {
+      ok: true,
+      message: `Campaña eliminada. Ubicaciones: ${local.locations}, base: ${local.snapshot}, conteos locales: ${local.group_counts}, nuevos locales: ${local.found_items}.`
+    };
+  } catch (error) {
+    return { ok: false, message: error.message };
+  }
+}
+
+async function saveRemoteBundle({ profiles, authorizedUsers, campaigns, locations, snapshot, groupCounts, foundItems, pendingDeletes, pruneLocationIds = null }) {
+  if (profiles) {
     await replaceAppUsers(profiles.map((profile) => ({
       id: profile.id,
       name: profile.full_name,
@@ -183,12 +237,19 @@ export async function pullFromSupabase() {
       updated_at: profile.updated_at,
       sync_status: 'synced'
     })));
+  }
+
+  if (authorizedUsers) {
     await saveAuthorizedUsers(authorizedUsers.map((row) => ({ ...row, sync_status: 'synced' })));
-    await saveCampaigns(campaigns.map((row) => ({ ...row, sync_status: 'synced' }))); 
-    await saveLocations(locations.map((row) => ({ ...row, sync_status: 'synced' })));
-    await saveSnapshotItems(snapshot.map((row) => ({ ...row, sync_status: 'synced' })));
-    await saveGroupCounts(groupCounts.map((row) => ({ ...row, sync_status: 'synced' })), { preservePending: true });
-    const locallyDeletedIds = new Set(pendingDeletes.filter((row) => row.table === 'found_items').map((row) => row.record_id));
+  }
+
+  if (campaigns) await saveCampaigns(campaigns.map((row) => ({ ...row, sync_status: 'synced' })));
+  if (locations) await saveLocations(locations.map((row) => ({ ...row, sync_status: 'synced' })));
+  if (snapshot) await saveSnapshotItems(snapshot.map((row) => ({ ...row, sync_status: 'synced' })));
+  if (groupCounts) await saveGroupCounts(groupCounts.map((row) => ({ ...row, sync_status: 'synced' })), { preservePending: true });
+
+  if (foundItems) {
+    const locallyDeletedIds = new Set((pendingDeletes || []).filter((row) => row.table === 'found_items').map((row) => row.record_id));
     await saveFoundItems(
       foundItems
         .filter((row) => !locallyDeletedIds.has(row.id))
@@ -197,13 +258,83 @@ export async function pullFromSupabase() {
     );
 
     const remoteFoundIds = new Set(foundItems.map((row) => row.id));
+    const scopedLocationIds = pruneLocationIds || (locations ? locations.map((location) => location.id) : foundItems.map((row) => row.location_id));
     const prunedFoundItems = await pruneSyncedFoundItemsMissingFromRemote(remoteFoundIds, {
-      excludeIds: locallyDeletedIds
+      excludeIds: locallyDeletedIds,
+      locationIds: scopedLocationIds
+    });
+    return prunedFoundItems;
+  }
+
+  return 0;
+}
+
+export async function pullFromSupabase(user = null) {
+  if (!isSupabaseConfigured) return { ok: false, message: 'Supabase no está configurado.' };
+
+  try {
+    // Hotfix operación: primero traemos tablas livianas. Después, las tablas pesadas
+    // se consultan solo por las ubicaciones visibles/asignadas. Esto evita timeouts
+    // en inventory_snapshot y group_counts cuando ya existen muchas campañas.
+    const [profiles, authorizedUsers, campaigns, locations, pendingDeletes] = await Promise.all([
+      selectAll('profiles', 'id, full_name, email, role, active, created_at, updated_at'),
+      selectAll('authorized_users', 'id, full_name, email, role, active, claimed_by, claimed_at, created_at, updated_at'),
+      selectAll('campaigns'),
+      selectAll('campaign_locations'),
+      listPendingDeletedRecords()
+    ]);
+
+    const scopedLocations = allowedLocationsForUser(locations, user);
+    const scopedLocationIds = scopedLocations.map((location) => location.id);
+
+    const [snapshot, groupCounts, foundItems] = await Promise.all([
+      selectAllByLocationIds('inventory_snapshot', scopedLocationIds),
+      selectAllByLocationIds('group_counts', scopedLocationIds),
+      selectAllByLocationIds('found_items', scopedLocationIds)
+    ]);
+
+    const prunedFoundItems = await saveRemoteBundle({
+      profiles,
+      authorizedUsers,
+      campaigns,
+      locations,
+      snapshot,
+      groupCounts,
+      foundItems,
+      pendingDeletes
     });
 
     return {
       ok: true,
-      message: `Datos actualizados desde Supabase. Usuarios autorizados: ${authorizedUsers.length}, campañas: ${campaigns.length}, ubicaciones: ${locations.length}, base: ${snapshot.length}, nuevos limpiados: ${prunedFoundItems}.`
+      message: `Datos actualizados desde Supabase. Campañas: ${campaigns.length}, ubicaciones: ${locations.length}, base descargada: ${snapshot.length}, conteos remotos: ${groupCounts.length}, nuevos limpiados: ${prunedFoundItems}.`
+    };
+  } catch (error) {
+    return { ok: false, message: error.message };
+  }
+}
+
+export async function pullLocationFromSupabase(locationId) {
+  if (!isSupabaseConfigured || !locationId) return { ok: false, message: 'Supabase no está configurado.' };
+
+  try {
+    const [snapshot, groupCounts, foundItems, pendingDeletes] = await Promise.all([
+      selectAll('inventory_snapshot', '*', (query) => query.eq('location_id', locationId)),
+      selectAll('group_counts', '*', (query) => query.eq('location_id', locationId)),
+      selectAll('found_items', '*', (query) => query.eq('location_id', locationId)),
+      listPendingDeletedRecords()
+    ]);
+
+    const prunedFoundItems = await saveRemoteBundle({
+      snapshot,
+      groupCounts,
+      foundItems,
+      pendingDeletes,
+      pruneLocationIds: [locationId]
+    });
+
+    return {
+      ok: true,
+      message: `Ubicación actualizada. Base: ${snapshot.length}, conteos: ${groupCounts.length}, nuevos limpiados: ${prunedFoundItems}.`
     };
   } catch (error) {
     return { ok: false, message: error.message };

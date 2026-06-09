@@ -40,7 +40,7 @@ export default function CounterDashboard({ user, onOpenCount }) {
   async function refresh() {
     setLoading(true);
     if (isSupabaseConfigured) {
-      const pulled = await pullFromSupabase();
+      const pulled = await pullFromSupabase(user);
       if (!pulled.ok) setMessage(`Aviso Supabase: ${pulled.message}`);
     }
 

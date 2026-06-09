@@ -421,9 +421,10 @@ export async function listFoundItemsByLocation(locationId) {
 
 
 
-export async function pruneSyncedFoundItemsMissingFromRemote(remoteIds, { excludeIds = [] } = {}) {
+export async function pruneSyncedFoundItemsMissingFromRemote(remoteIds, { excludeIds = [], locationIds = null } = {}) {
   const remoteSet = remoteIds instanceof Set ? remoteIds : new Set(remoteIds || []);
   const excludeSet = excludeIds instanceof Set ? excludeIds : new Set(excludeIds || []);
+  const locationSet = locationIds ? (locationIds instanceof Set ? locationIds : new Set(locationIds || [])) : null;
   const db = await getDB();
   const tx = db.transaction('found_items', 'readwrite');
   const rows = await tx.store.getAll();
@@ -433,6 +434,7 @@ export async function pruneSyncedFoundItemsMissingFromRemote(remoteIds, { exclud
     // Protección crítica: nunca eliminar registros creados/editados localmente
     // que todavía no han sido sincronizados. Solo se limpian registros que
     // ya estaban en estado synced y desaparecieron de Supabase.
+    if (locationSet && !locationSet.has(row.location_id)) return;
     if (row?.sync_status === 'synced' && !remoteSet.has(row.id) && !excludeSet.has(row.id)) {
       await tx.store.delete(row.id);
       deleted += 1;
@@ -490,4 +492,47 @@ export async function clearLocalDatabase() {
   const tx = db.transaction(stores, 'readwrite');
   await Promise.all(stores.map((store) => tx.objectStore(store).clear()));
   await tx.done;
+}
+
+
+export async function deleteLocalCampaignCascade(campaignId) {
+  if (!campaignId) return { campaigns: 0, locations: 0, snapshot: 0, group_counts: 0, found_items: 0, counts: 0 };
+  const db = await getDB();
+  const stores = ['campaigns', 'locations', 'snapshot', 'counts', 'group_counts', 'found_items', 'deleted_records'];
+  const tx = db.transaction(stores, 'readwrite');
+
+  const locations = await tx.objectStore('locations').index('campaign_id').getAll(campaignId);
+  const locationIds = new Set(locations.map((location) => location.id));
+  const snapshot = await tx.objectStore('snapshot').index('campaign_id').getAll(campaignId);
+  const counts = await tx.objectStore('counts').index('campaign_id').getAll(campaignId);
+  const groupCounts = await tx.objectStore('group_counts').index('campaign_id').getAll(campaignId);
+  const foundItems = await tx.objectStore('found_items').index('campaign_id').getAll(campaignId);
+  const deletedRecords = await tx.objectStore('deleted_records').getAll();
+
+  await tx.objectStore('campaigns').delete(campaignId);
+  await Promise.all(locations.map((row) => tx.objectStore('locations').delete(row.id)));
+  await Promise.all(snapshot.map((row) => tx.objectStore('snapshot').delete(row.id)));
+  await Promise.all(counts.map((row) => tx.objectStore('counts').delete(row.id)));
+  await Promise.all(groupCounts.map((row) => tx.objectStore('group_counts').delete(row.id)));
+  await Promise.all(foundItems.map((row) => tx.objectStore('found_items').delete(row.id)));
+
+  // Limpia marcas de borrado locales asociadas a códigos nuevos de la campaña eliminada.
+  await Promise.all(deletedRecords.map(async (row) => {
+    const recordId = row?.record_id || '';
+    const belongsToDeletedLocation = row?.location_id && locationIds.has(row.location_id);
+    const belongsToDeletedFound = foundItems.some((item) => item.id === recordId);
+    if (belongsToDeletedLocation || belongsToDeletedFound) {
+      await tx.objectStore('deleted_records').delete(row.id);
+    }
+  }));
+
+  await tx.done;
+  return {
+    campaigns: 1,
+    locations: locations.length,
+    snapshot: snapshot.length,
+    counts: counts.length,
+    group_counts: groupCounts.length,
+    found_items: foundItems.length
+  };
 }

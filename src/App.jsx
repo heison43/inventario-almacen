@@ -28,7 +28,7 @@ export default function App() {
           if (profile) {
             setUser(profile);
             setView(profile.role === 'admin' ? 'admin' : 'counter');
-            await pullFromSupabase();
+            await pullFromSupabase(profile);
           }
         } else {
           const stored = localStorage.getItem(USER_KEY);
@@ -66,7 +66,7 @@ export default function App() {
   async function handleSync() {
     setSyncMessage('Sincronizando...');
     const pushed = await syncPendingChanges(user);
-    const pulled = pushed.ok ? await pullFromSupabase() : null;
+    const pulled = pushed.ok ? await pullFromSupabase(user) : null;
     setSyncMessage(pushed.ok ? `${pushed.message} ${pulled?.message || ''}` : pushed.message);
   }
 

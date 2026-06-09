@@ -13,6 +13,8 @@ import {
   updateLocation
 } from '../lib/db.js';
 import { exportLocalBackup } from '../lib/reconciliation.js';
+import { isSupabaseConfigured } from '../lib/supabaseClient.js';
+import { pullLocationFromSupabase } from '../lib/remoteSync.js';
 import { formatNumber, getStatusFromDifference, statusLabel, toNumber } from '../lib/utils.js';
 
 const MATERIAL_CONDITIONS = [
@@ -133,19 +135,53 @@ export default function CountPage({ user, campaignId, locationId, onBack }) {
   useEffect(() => { load(); }, [campaignId, locationId]);
 
   async function load() {
-    const [campaignRow, locationRow, snapshots, counts, found] = await Promise.all([
+    // Limpiamos temporalmente la tabla para evitar que se vea información de una
+    // ubicación anterior mientras carga la ubicación actual.
+    setSnapshotRows([]);
+    setGroupCounts([]);
+    setFoundItems([]);
+
+    const [campaignRow, locationRow] = await Promise.all([
       getCampaign(campaignId),
-      getLocation(locationId),
+      getLocation(locationId)
+    ]);
+
+    setCampaign(campaignRow);
+    setLocation(locationRow);
+
+    if (isSupabaseConfigured) {
+      const pulled = await pullLocationFromSupabase(locationId);
+      if (!pulled.ok) setMessage(`Aviso Supabase: ${pulled.message}. Se muestran datos locales disponibles.`);
+    }
+
+    const [snapshots, counts, found] = await Promise.all([
       listSnapshotByLocation(locationId),
       listGroupCountsByLocation(locationId),
       listFoundItemsByLocation(locationId)
     ]);
 
-    setCampaign(campaignRow);
-    setLocation(locationRow);
-    setSnapshotRows(snapshots);
-    setGroupCounts(counts);
-    setFoundItems(found);
+    // Filtro defensivo: aunque el navegador tenga datos locales viejos o mezclados,
+    // la pantalla solo muestra registros de esta campaña y esta ubicación.
+    const exactLocation = String(locationRow?.location || '').trim();
+    const exactSnapshots = snapshots.filter((row) =>
+      row.campaign_id === campaignId &&
+      row.location_id === locationId &&
+      (!exactLocation || String(row.location || '').trim() === exactLocation)
+    );
+    const exactCounts = counts.filter((row) =>
+      row.campaign_id === campaignId &&
+      row.location_id === locationId &&
+      (!exactLocation || String(row.location || '').trim() === exactLocation)
+    );
+    const exactFound = found.filter((row) =>
+      row.campaign_id === campaignId &&
+      row.location_id === locationId &&
+      (!exactLocation || String(row.location || '').trim() === exactLocation)
+    );
+
+    setSnapshotRows(exactSnapshots);
+    setGroupCounts(exactCounts);
+    setFoundItems(exactFound);
 
     if (locationRow?.status === 'pendiente' || locationRow?.status === 'asignada') {
       await updateLocation(locationId, { status: 'en_conteo' });

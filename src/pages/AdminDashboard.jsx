@@ -1,10 +1,10 @@
-import { FileSpreadsheet, RefreshCw, UsersRound } from 'lucide-react';
+import { FileSpreadsheet, RefreshCw, Trash2, UsersRound } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { listAppUsers, listCampaigns, listLocations, updateLocation } from '../lib/db.js';
 import { autoDetectMapping, createCampaignFromRows, parseInventoryFile, REQUIRED_FIELDS } from '../lib/importInventory.js';
 import { deriveZoneFromLocation, formatNumber, statusLabel } from '../lib/utils.js';
 import { isSupabaseConfigured } from '../lib/supabaseClient.js';
-import { pullFromSupabase, pushCampaignBundle, syncPendingChanges } from '../lib/remoteSync.js';
+import { deleteCampaignEverywhere, pullFromSupabase, pushCampaignBundle, syncPendingChanges } from '../lib/remoteSync.js';
 
 const GROUPS = Array.from({ length: 20 }, (_, index) => `grupo${index + 1}`);
 const visibleMappingFields = ['material_code', 'material_name', 'material_name_cn', 'unit', 'system_qty', 'location', 'department', 'warehouse'];
@@ -128,6 +128,23 @@ export default function AdminDashboard({ user, onOpenReconciliation }) {
     await refresh();
   }
 
+  async function handleDeleteCampaign(campaign) {
+    const confirmation = window.confirm(
+      `Vas a eliminar la campaña "${campaign.name}".\n\n` +
+      'Esta acción borra la campaña, sus ubicaciones y la base importada asociada. ' +
+      'Por seguridad, la app no la eliminará si ya tiene conteos o códigos nuevos sincronizados.\n\n' +
+      '¿Deseas continuar?'
+    );
+    if (!confirmation) return;
+
+    setLoading(true);
+    setMessage(`Eliminando campaña ${campaign.name}...`);
+    const result = await deleteCampaignEverywhere(campaign.id);
+    setMessage(result.ok ? result.message : `No se pudo eliminar: ${result.message}`);
+    setLoading(false);
+    await refresh();
+  }
+
   const mappingFields = REQUIRED_FIELDS.filter((field) => visibleMappingFields.includes(field.key));
   const technicalFields = REQUIRED_FIELDS.filter((field) => technicalMappingFields.includes(field.key));
 
@@ -227,9 +244,14 @@ export default function AdminDashboard({ user, onOpenReconciliation }) {
                   <h3>{campaign.name}</h3>
                   <p>{campaign.warehouse} · Zona {campaign.zone}</p>
                 </div>
-                <button className="secondary-button" onClick={() => onOpenReconciliation(campaign.id)}>
-                  Ver conciliación
-                </button>
+                <div className="button-row compact-actions">
+                  <button className="secondary-button" onClick={() => onOpenReconciliation(campaign.id)}>
+                    Ver conciliación
+                  </button>
+                  <button className="danger-button subtle-danger" onClick={() => handleDeleteCampaign(campaign)} disabled={loading}>
+                    <Trash2 size={16} /> Eliminar
+                  </button>
+                </div>
               </div>
               <div className="metrics-row">
                 <span><strong>{campaign.locations.length}</strong> ubicaciones</span>
