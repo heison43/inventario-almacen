@@ -473,6 +473,50 @@ export async function pruneSyncedFoundItemsMissingFromRemote(remoteIds, { exclud
   return deleted;
 }
 
+
+export async function listLocationSyncStates(locationIds = []) {
+  const ids = Array.from(new Set((locationIds || []).filter(Boolean)));
+  if (!ids.length) return {};
+
+  const idSet = new Set(ids);
+  const states = new Map(ids.map((id) => [id, {
+    pending: 0,
+    synced: true,
+    details: { location: 0, counts: 0, found: 0, deleted: 0 }
+  }]));
+
+  function addPending(locationId, type) {
+    if (!idSet.has(locationId)) return;
+    const current = states.get(locationId) || {
+      pending: 0,
+      synced: true,
+      details: { location: 0, counts: 0, found: 0, deleted: 0 }
+    };
+    current.pending += 1;
+    current.synced = false;
+    current.details[type] = (current.details[type] || 0) + 1;
+    states.set(locationId, current);
+  }
+
+  const db = await getDB();
+  const tx = db.transaction(['locations', 'group_counts', 'found_items', 'deleted_records'], 'readonly');
+
+  const [pendingLocations, pendingCounts, pendingFound, pendingDeleted] = await Promise.all([
+    tx.objectStore('locations').index('sync_status').getAll('pending'),
+    tx.objectStore('group_counts').index('sync_status').getAll('pending'),
+    tx.objectStore('found_items').index('sync_status').getAll('pending'),
+    tx.objectStore('deleted_records').index('sync_status').getAll('pending')
+  ]);
+
+  pendingLocations.forEach((row) => addPending(row.location_id || row.id, 'location'));
+  pendingCounts.forEach((row) => addPending(row.location_id, 'counts'));
+  pendingFound.forEach((row) => addPending(row.location_id, 'found'));
+  pendingDeleted.forEach((row) => addPending(row.location_id, 'deleted'));
+
+  await tx.done;
+  return Object.fromEntries(states.entries());
+}
+
 export async function deleteFoundItem(id, { queueRemote = true } = {}) {
   const db = await getDB();
   const tx = db.transaction(['found_items', 'deleted_records'], 'readwrite');
@@ -491,6 +535,10 @@ export async function deleteFoundItem(id, { queueRemote = true } = {}) {
       id: `found_items::${id}`,
       table: 'found_items',
       record_id: id,
+      campaign_id: current.campaign_id,
+      location_id: current.location_id,
+      location: current.location,
+      material_code: current.material_code,
       sync_status: 'pending',
       created_at: new Date().toISOString()
     });

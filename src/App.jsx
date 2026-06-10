@@ -68,6 +68,7 @@ export default function App() {
     const pushed = await syncPendingChanges(user);
     const pulled = pushed.ok ? await pullFromSupabase(user) : null;
     setSyncMessage(pushed.ok ? `${pushed.message} ${pulled?.message || ''}` : pushed.message);
+    window.dispatchEvent(new CustomEvent('inventario-sync-completed', { detail: { ok: pushed.ok } }));
   }
 
   function openCount(campaignId, locationId) {

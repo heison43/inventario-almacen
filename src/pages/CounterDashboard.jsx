@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronRight, ClipboardList, RefreshCw } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { listAppUsers, listCampaigns, listLocations } from '../lib/db.js';
+import { listAppUsers, listCampaigns, listLocations, listLocationSyncStates } from '../lib/db.js';
 import { isSupabaseConfigured } from '../lib/supabaseClient.js';
 import { pullFromSupabase } from '../lib/remoteSync.js';
 import { statusLabel } from '../lib/utils.js';
@@ -40,6 +40,12 @@ export default function CounterDashboard({ user, onOpenCount }) {
     refresh({ remote: false });
   }, [showOnlyAssigned, selectedGroup, selectedUser]);
 
+  useEffect(() => {
+    const handleSyncCompleted = () => refresh({ remote: false });
+    window.addEventListener('inventario-sync-completed', handleSyncCompleted);
+    return () => window.removeEventListener('inventario-sync-completed', handleSyncCompleted);
+  }, [showOnlyAssigned, selectedGroup, selectedUser]);
+
   async function refresh({ remote = false } = {}) {
     setLoading(true);
     let remoteMessage = '';
@@ -71,7 +77,14 @@ export default function CounterDashboard({ user, onOpenCount }) {
         return assignedOk;
       });
 
-      return { ...campaign, locations: visibleLocations };
+      const syncStates = await listLocationSyncStates(visibleLocations.map((location) => location.id));
+      return {
+        ...campaign,
+        locations: visibleLocations.map((location) => ({
+          ...location,
+          syncState: syncStates[location.id] || { pending: 0, synced: true, details: {} }
+        }))
+      };
     }));
 
     setCampaigns(hydrated.filter((campaign) => campaign.locations.length > 0));
@@ -142,11 +155,19 @@ export default function CounterDashboard({ user, onOpenCount }) {
               {!collapsed && (
                 <div className="location-grid">
                   {campaign.locations.map((location) => (
-                    <button key={location.id} className={`location-card ${groupClass(location.assigned_group)} status-${location.status}`} onClick={() => onOpenCount(campaign.id, location.id)}>
+                    <button
+                      key={location.id}
+                      className={`location-card ${groupClass(location.assigned_group)} status-${location.status} ${location.syncState?.synced ? 'sync-synced' : 'sync-pending'}`}
+                      onClick={() => onOpenCount(campaign.id, location.id)}
+                      title={location.syncState?.synced ? 'Ubicación sincronizada' : `Pendiente por sincronizar: ${location.syncState?.pending || 1} cambio(s)`}
+                    >
                       <ClipboardList size={20} />
                       <strong>{location.location}</strong>
                       <span className={`status-pill ${location.status}`}>{statusLabel(location.status)}</span>
                       <small>{location.assigned_group || 'Sin grupo'}</small>
+                      <span className={`sync-pill ${location.syncState?.synced ? 'synced' : 'pending'}`}>
+                        {location.syncState?.synced ? 'Sincronizada' : 'Sin sincronizar'}
+                      </span>
                     </button>
                   ))}
                 </div>
