@@ -256,6 +256,34 @@ export async function updateLocation(id, changes) {
   return updated;
 }
 
+export async function updateLocationsBulk(updates = []) {
+  if (!updates.length) return [];
+  const db = await getDB();
+  const tx = db.transaction('locations', 'readwrite');
+  const store = tx.objectStore('locations');
+  const now = new Date().toISOString();
+  const updatedRows = [];
+
+  for (const update of updates) {
+    const id = update?.id;
+    if (!id) continue;
+    const current = await store.get(id);
+    if (!current) continue;
+    const changes = update.changes || {};
+    const updated = {
+      ...current,
+      ...changes,
+      sync_status: changes.sync_status || 'pending',
+      updated_at: now
+    };
+    await store.put(updated);
+    updatedRows.push(updated);
+  }
+
+  await tx.done;
+  return updatedRows;
+}
+
 export async function listPendingLocations() {
   const db = await getDB();
   return db.getAllFromIndex('locations', 'sync_status', 'pending');

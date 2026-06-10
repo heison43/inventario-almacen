@@ -464,3 +464,28 @@ tr.selected-row td:first-child { box-shadow: inset 4px 0 0 #0284c7; }
 @media (max-width: 980px) {
   .found-edit-grid { grid-template-columns: 1fr; }
 }
+
+.bulk-assignment-card {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: #f8fafc;
+  display: grid;
+  gap: 12px;
+}
+.bulk-assignment-card h4 { margin: 0 0 4px; }
+.bulk-assignment-card p { margin: 0; }
+.bulk-assignment-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+.bulk-apply-button { min-height: 46px; }
+@media (max-width: 1180px) {
+  .bulk-assignment-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 620px) {
+  .bulk-assignment-grid { grid-template-columns: 1fr; }
+}

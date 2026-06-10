@@ -1,6 +1,6 @@
 import { FileSpreadsheet, RefreshCw, Trash2, UsersRound } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { listAppUsers, listCampaigns, listLocations, updateLocation } from '../lib/db.js';
+import { listAppUsers, listCampaigns, listLocations, updateLocation, updateLocationsBulk } from '../lib/db.js';
 import { autoDetectMapping, createCampaignFromRows, parseInventoryFile, REQUIRED_FIELDS } from '../lib/importInventory.js';
 import { deriveZoneFromLocation, formatNumber, statusLabel } from '../lib/utils.js';
 import { isSupabaseConfigured } from '../lib/supabaseClient.js';
@@ -38,6 +38,8 @@ export default function AdminDashboard({ user, onOpenReconciliation }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [syncingRemote, setSyncingRemote] = useState(false);
+  const [bulkAssignments, setBulkAssignments] = useState({});
+  const [savingBulkId, setSavingBulkId] = useState('');
 
   useEffect(() => { refresh(); }, []);
 
@@ -120,12 +122,111 @@ export default function AdminDashboard({ user, onOpenReconciliation }) {
     }
   }
 
+  function updateCampaignLocationState(locationId, updatedRow) {
+    setCampaigns((current) => current.map((campaign) => ({
+      ...campaign,
+      locations: campaign.locations.map((location) => (location.id === locationId ? { ...location, ...updatedRow } : location))
+    })));
+  }
+
+  function updateCampaignLocationsState(campaignId, updatedRows) {
+    const updatedById = new Map(updatedRows.map((row) => [row.id, row]));
+    setCampaigns((current) => current.map((campaign) => {
+      if (campaign.id !== campaignId) return campaign;
+      return {
+        ...campaign,
+        locations: campaign.locations.map((location) => updatedById.has(location.id) ? { ...location, ...updatedById.get(location.id) } : location)
+      };
+    }));
+  }
+
   async function assignLocation(locationId, changes) {
     const next = { ...changes };
     if ('assigned_to' in next) next.status = next.assigned_to ? 'asignada' : 'pendiente';
-    await updateLocation(locationId, next);
-    if (isSupabaseConfigured) await syncPendingChanges(user);
-    await refresh();
+    const updated = await updateLocation(locationId, next);
+    if (updated) updateCampaignLocationState(locationId, updated);
+    if (isSupabaseConfigured) {
+      const synced = await syncPendingChanges(user);
+      if (!synced.ok) setMessage(`Aviso Supabase: ${synced.message}`);
+    }
+  }
+
+  function getBulkAssignment(campaignId) {
+    return bulkAssignments[campaignId] || { from: '', to: '', assigned_group: '', assigned_to: '' };
+  }
+
+  function setBulkAssignmentField(campaignId, field, value) {
+    setBulkAssignments((current) => ({
+      ...current,
+      [campaignId]: {
+        ...(current[campaignId] || { from: '', to: '', assigned_group: '', assigned_to: '' }),
+        [field]: value
+      }
+    }));
+  }
+
+  function locationsInRange(locations, from, to) {
+    const start = String(from || '').trim().toUpperCase();
+    const end = String(to || '').trim().toUpperCase();
+    if (!start || !end) return [];
+    const min = start.localeCompare(end) <= 0 ? start : end;
+    const max = start.localeCompare(end) <= 0 ? end : start;
+    return (locations || []).filter((location) => {
+      const value = String(location.location || '').trim().toUpperCase();
+      return value.localeCompare(min) >= 0 && value.localeCompare(max) <= 0;
+    });
+  }
+
+  async function applyBulkAssignment(campaign) {
+    const bulk = getBulkAssignment(campaign.id);
+    const targetLocations = locationsInRange(campaign.locations, bulk.from, bulk.to);
+
+    if (!bulk.from || !bulk.to) {
+      setMessage('Selecciona ubicación inicial y ubicación final para aplicar la asignación masiva.');
+      return;
+    }
+    if (!targetLocations.length) {
+      setMessage('No se encontraron ubicaciones dentro del rango indicado.');
+      return;
+    }
+    if (!bulk.assigned_group && !bulk.assigned_to) {
+      setMessage('Selecciona al menos un grupo o un contador para aplicar al rango.');
+      return;
+    }
+
+    const changes = {};
+    if (bulk.assigned_group) changes.assigned_group = bulk.assigned_group === '__clear__' ? null : bulk.assigned_group;
+    if (bulk.assigned_to) {
+      changes.assigned_to = bulk.assigned_to === '__clear__' ? null : bulk.assigned_to;
+      changes.status = changes.assigned_to ? 'asignada' : 'pendiente';
+    }
+
+    const confirmation = window.confirm(
+      `Se actualizarán ${targetLocations.length} ubicaciones de la campaña "${campaign.name}".\n\n` +
+      `Desde: ${bulk.from}\nHasta: ${bulk.to}\n\n¿Deseas continuar?`
+    );
+    if (!confirmation) return;
+
+    setSavingBulkId(campaign.id);
+    setMessage(`Aplicando asignación masiva a ${targetLocations.length} ubicaciones...`);
+    try {
+      const updatedRows = await updateLocationsBulk(targetLocations.map((location) => ({ id: location.id, changes })));
+      updateCampaignLocationsState(campaign.id, updatedRows);
+
+      if (isSupabaseConfigured) {
+        const synced = await syncPendingChanges(user);
+        setMessage(synced.ok
+          ? `Asignación masiva aplicada a ${updatedRows.length} ubicaciones. ${synced.message}`
+          : `Asignación masiva guardada localmente, pero falta sincronizar con Supabase: ${synced.message}`
+        );
+      } else {
+        setMessage(`Asignación masiva aplicada localmente a ${updatedRows.length} ubicaciones.`);
+      }
+    } catch (error) {
+      setMessage(`Error aplicando asignación masiva: ${error.message}`);
+    } finally {
+      setSavingBulkId('');
+    }
   }
 
   async function handleDeleteCampaign(campaign) {
@@ -261,6 +362,70 @@ export default function AdminDashboard({ user, onOpenReconciliation }) {
 
               <details className="assignment-panel">
                 <summary><UsersRound size={16} /> Abrir asignación de ubicaciones por contador y grupo</summary>
+
+                <div className="bulk-assignment-card">
+                  <div>
+                    <h4>Asignación masiva por rango</h4>
+                    <p className="muted-text">Selecciona desde qué ubicación hasta qué ubicación quieres aplicar el mismo grupo y/o contador. La app guarda todo el rango de una sola vez.</p>
+                  </div>
+                  <div className="bulk-assignment-grid">
+                    <label>
+                      Desde ubicación
+                      <select
+                        value={getBulkAssignment(campaign.id).from}
+                        onChange={(e) => setBulkAssignmentField(campaign.id, 'from', e.target.value)}
+                      >
+                        <option value="">Seleccionar inicio</option>
+                        {campaign.locations.map((location) => <option key={`from-${location.id}`} value={location.location}>{location.location}</option>)}
+                      </select>
+                    </label>
+                    <label>
+                      Hasta ubicación
+                      <select
+                        value={getBulkAssignment(campaign.id).to}
+                        onChange={(e) => setBulkAssignmentField(campaign.id, 'to', e.target.value)}
+                      >
+                        <option value="">Seleccionar final</option>
+                        {campaign.locations.map((location) => <option key={`to-${location.id}`} value={location.location}>{location.location}</option>)}
+                      </select>
+                    </label>
+                    <label>
+                      Grupo
+                      <select
+                        value={getBulkAssignment(campaign.id).assigned_group}
+                        onChange={(e) => setBulkAssignmentField(campaign.id, 'assigned_group', e.target.value)}
+                      >
+                        <option value="">No cambiar grupo</option>
+                        <option value="__clear__">Quitar grupo</option>
+                        {GROUPS.map((group) => <option key={group} value={group}>{group}</option>)}
+                      </select>
+                    </label>
+                    <label>
+                      Contador
+                      <select
+                        value={getBulkAssignment(campaign.id).assigned_to}
+                        onChange={(e) => setBulkAssignmentField(campaign.id, 'assigned_to', e.target.value)}
+                      >
+                        <option value="">No cambiar contador</option>
+                        <option value="__clear__">Quitar contador</option>
+                        {counters.map((counter) => (
+                          <option key={counter.id} value={counter.email}>{counter.name} · {counter.email}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      className="primary-button bulk-apply-button"
+                      onClick={() => applyBulkAssignment(campaign)}
+                      disabled={savingBulkId === campaign.id}
+                    >
+                      {savingBulkId === campaign.id ? 'Aplicando...' : 'Aplicar rango'}
+                    </button>
+                  </div>
+                  <small className="muted-text">
+                    Ubicaciones afectadas con el rango actual: {locationsInRange(campaign.locations, getBulkAssignment(campaign.id).from, getBulkAssignment(campaign.id).to).length}
+                  </small>
+                </div>
+
                 <div className="responsive-table compact-table">
                   <table>
                     <thead>
