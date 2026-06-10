@@ -34,14 +34,20 @@ export default function CounterDashboard({ user, onOpenCount }) {
 
   useEffect(() => {
     localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify({ showOnlyAssigned, selectedGroup, selectedUser }));
-    refresh();
+    // Operación rápida: al volver desde una ubicación o cambiar filtros, primero
+    // se pinta la información que ya está en IndexedDB. No se consulta Supabase
+    // automáticamente porque con campañas grandes eso hace lento el botón Volver.
+    refresh({ remote: false });
   }, [showOnlyAssigned, selectedGroup, selectedUser]);
 
-  async function refresh() {
+  async function refresh({ remote = false } = {}) {
     setLoading(true);
-    if (isSupabaseConfigured) {
+    let remoteMessage = '';
+
+    if (remote && isSupabaseConfigured) {
       const pulled = await pullFromSupabase(user);
-      if (!pulled.ok) setMessage(`Aviso Supabase: ${pulled.message}`);
+      if (!pulled.ok) remoteMessage = `Aviso Supabase: ${pulled.message}`;
+      else remoteMessage = pulled.message || '';
     }
 
     const [rows, counterRows] = await Promise.all([
@@ -69,6 +75,7 @@ export default function CounterDashboard({ user, onOpenCount }) {
     }));
 
     setCampaigns(hydrated.filter((campaign) => campaign.locations.length > 0));
+    if (remoteMessage) setMessage(remoteMessage);
     setLoading(false);
   }
 
@@ -114,7 +121,7 @@ export default function CounterDashboard({ user, onOpenCount }) {
           {selectedGroup !== 'todos' && (
             <button className="ghost-light-button" type="button" onClick={() => setSelectedGroup('todos')}>Ver todos los grupos</button>
           )}
-          <button className="secondary-button" onClick={refresh} disabled={loading}><RefreshCw size={16} /> {loading ? 'Actualizando...' : 'Actualizar'}</button>
+          <button className="secondary-button" onClick={() => refresh({ remote: true })} disabled={loading}><RefreshCw size={16} /> {loading ? 'Actualizando...' : 'Actualizar'}</button>
         </div>
       </div>
 
