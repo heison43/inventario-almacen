@@ -536,6 +536,15 @@ export default function CountPage({ user, campaignId, locationId, onBack }) {
                 </Fragment>
               );
             })}
+            {!filtered.length && (
+              <tr>
+                <td colSpan="14">
+                  <div className="empty-state inline-empty">
+                    Esta ubicación no tiene materiales en sistema. Usa <strong>Agregar código nuevo</strong> para registrar los materiales encontrados físicamente.
+                  </div>
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

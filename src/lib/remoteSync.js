@@ -33,7 +33,7 @@ function unique(values) {
 }
 
 function stripLocalFields(row) {
-  const { sync_status, ...clean } = row || {};
+  const { sync_status, created_from_physical, local_only, sync_error, ...clean } = row || {};
   return clean;
 }
 
@@ -156,17 +156,21 @@ export async function syncPendingChanges(user) {
       updated_at: row.updated_at || new Date().toISOString()
     }));
 
-    const locationPayload = pendingLocations.map(stripLocalFields);
+    const manualLocations = pendingLocations.filter((row) => row.created_from_physical || String(row.id || '').startsWith('loc_found_'));
+    const regularLocations = pendingLocations.filter((row) => !manualLocations.some((manual) => manual.id === row.id));
+    const manualLocationPayload = manualLocations.map(stripLocalFields);
+    const regularLocationPayload = regularLocations.map(stripLocalFields);
     const foundDeleteIds = pendingDeletes
       .filter((row) => row.table === 'found_items')
       .map((row) => row.record_id)
       .filter(Boolean);
 
-    // Admin puede crear/actualizar ubicaciones. El contador solo actualiza estado
-    // de ubicaciones existentes para evitar errores de RLS por intentos de INSERT.
-    const syncedLocations = user?.role === 'admin'
-      ? await upsertInChunks('campaign_locations', locationPayload, { onConflict: 'id' })
-      : await updateInChunks('campaign_locations', locationPayload);
+    // Las ubicaciones normales ya se crean durante la importación de la campaña,
+    // por eso se actualizan con UPDATE. Las ubicaciones encontradas físicamente
+    // sí deben insertarse si no existían en Supabase.
+    const insertedManualLocations = await upsertInChunks('campaign_locations', manualLocationPayload, { onConflict: 'id' });
+    const updatedRegularLocations = await updateInChunks('campaign_locations', regularLocationPayload);
+    const syncedLocations = insertedManualLocations + updatedRegularLocations;
     const syncedGroups = await upsertInChunks('group_counts', groupPayload, { onConflict: 'id' });
     const syncedFound = await upsertInChunks('found_items', foundPayload, { onConflict: 'id' });
     const deletedFound = await deleteInChunks('found_items', foundDeleteIds);

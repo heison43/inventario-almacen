@@ -528,3 +528,41 @@ tr.selected-row td:first-child { box-shadow: inset 4px 0 0 #0284c7; }
 @media (max-width: 620px) {
   .sync-pill { font-size: .68rem; }
 }
+
+/* v20 - Ubicaciones encontradas físicamente */
+.manual-location-actions {
+  margin: 10px 0 12px;
+}
+.manual-location-panel {
+  margin: 10px 0 16px;
+  padding: 14px;
+  border: 1px solid #bfdbfe;
+  border-radius: 18px;
+  background: #eff6ff;
+  display: grid;
+  grid-template-columns: minmax(220px, 1.5fr) minmax(220px, 1fr) minmax(180px, .8fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+.manual-location-panel p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: .88rem;
+}
+.manual-location-panel label {
+  font-weight: 800;
+  color: #334155;
+  font-size: .82rem;
+}
+.manual-location-panel input,
+.manual-location-panel select {
+  margin-top: 6px;
+  width: 100%;
+}
+@media (max-width: 1100px) {
+  .manual-location-panel { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 640px) {
+  .manual-location-panel { grid-template-columns: 1fr; }
+}
+.inline-empty { margin: 0; }

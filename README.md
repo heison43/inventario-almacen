@@ -138,3 +138,24 @@ inventario.tudominio.com
 ## Versión v13 - sincronización segura
 
 Ajuste operativo: al sincronizar, los códigos nuevos eliminados en Supabase se limpian localmente solo si ya estaban sincronizados y no tienen cambios pendientes. No requiere migración nueva.
+
+## v20 - Ubicación encontrada físicamente
+
+Esta versión agrega la opción **Agregar ubicación encontrada** en la pantalla de conteo.
+Sirve para crear dentro de una campaña una ubicación que no venía en la data porque en sistema estaba en cero, pero donde físicamente se encontró material.
+
+Flujo recomendado:
+1. Entrar al grupo/zona de conteo.
+2. Presionar **Agregar ubicación encontrada**.
+3. Escribir la ubicación real encontrada.
+4. Crear la ubicación.
+5. Entrar a la nueva tarjeta y usar **Agregar código nuevo** para registrar los materiales físicos.
+6. Sincronizar cuando haya buena señal.
+
+### Migración requerida
+
+Para que los usuarios contadores puedan crear estas ubicaciones y sincronizarlas con Supabase, ejecutar una sola vez:
+
+`supabase/migration_v20_counter_found_locations.sql`
+
+No crea tablas nuevas. Solo ajusta la política RLS de inserción en `campaign_locations` para permitir que el contador cree ubicaciones asignadas a su propio correo.

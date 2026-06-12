@@ -410,7 +410,7 @@ create policy "locations_admin_insert"
 on public.campaign_locations
 for insert
 to authenticated
-with check (public.is_admin() or public.is_admin_user());
+with check (public.is_admin() or public.is_admin_user() or lower(assigned_to) = lower(auth.email()));
 
 create policy "locations_admin_or_counter_update"
 on public.campaign_locations

@@ -1,6 +1,6 @@
-import { ChevronDown, ChevronRight, ClipboardList, RefreshCw } from 'lucide-react';
+import { ChevronDown, ChevronRight, ClipboardList, Plus, RefreshCw, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { listAppUsers, listCampaigns, listLocations, listLocationSyncStates } from '../lib/db.js';
+import { createDiscoveredLocation, listAppUsers, listCampaigns, listLocations, listLocationSyncStates } from '../lib/db.js';
 import { isSupabaseConfigured } from '../lib/supabaseClient.js';
 import { pullFromSupabase } from '../lib/remoteSync.js';
 import { statusLabel } from '../lib/utils.js';
@@ -29,6 +29,9 @@ export default function CounterDashboard({ user, onOpenCount }) {
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [collapsedCampaigns, setCollapsedCampaigns] = useState({});
+  const [manualFormCampaignId, setManualFormCampaignId] = useState('');
+  const [manualLocationValue, setManualLocationValue] = useState('');
+  const [manualGroupValue, setManualGroupValue] = useState(savedFilters.selectedGroup && savedFilters.selectedGroup !== 'todos' ? savedFilters.selectedGroup : '');
 
   const isAdmin = user?.role === 'admin';
 
@@ -96,6 +99,29 @@ export default function CounterDashboard({ user, onOpenCount }) {
     setCollapsedCampaigns((current) => ({ ...current, [campaignId]: !current[campaignId] }));
   }
 
+
+  async function addDiscoveredLocation(campaign) {
+    const selectedManualGroup = manualGroupValue || (selectedGroup !== 'todos' ? selectedGroup : '');
+    const assignedEmail = isAdmin && selectedUser !== 'todos' ? selectedUser : (user?.email || '');
+    const result = await createDiscoveredLocation({
+      campaign,
+      location: manualLocationValue,
+      assignedGroup: selectedManualGroup,
+      userEmail: assignedEmail
+    });
+
+    setMessage(result.message || (result.ok ? 'Ubicación encontrada agregada.' : 'No se pudo agregar la ubicación.'));
+    if (!result.ok) return;
+
+    setManualLocationValue('');
+    setManualFormCampaignId('');
+    if (selectedManualGroup && selectedManualGroup !== selectedGroup) {
+      setSelectedGroup(selectedManualGroup);
+      return;
+    }
+    await refresh({ remote: false });
+  }
+
   const groupOptions = useMemo(() => GROUPS, []);
 
   return (
@@ -153,7 +179,49 @@ export default function CounterDashboard({ user, onOpenCount }) {
                 </span>
               </button>
               {!collapsed && (
-                <div className="location-grid">
+                <>
+                  <div className="button-row manual-location-actions">
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      onClick={() => {
+                        setManualFormCampaignId((current) => current === campaign.id ? '' : campaign.id);
+                        setManualGroupValue(selectedGroup !== 'todos' ? selectedGroup : (manualGroupValue || ''));
+                      }}
+                    >
+                      <Plus size={16} /> Agregar ubicación encontrada
+                    </button>
+                  </div>
+
+                  {manualFormCampaignId === campaign.id && (
+                    <div className="manual-location-panel">
+                      <div>
+                        <strong>Crear ubicación vacía en esta campaña</strong>
+                        <p>Úsala cuando la ubicación no venía en la data porque el sistema estaba en cero, pero físicamente sí tiene material.</p>
+                      </div>
+                      <label>
+                        Ubicación real encontrada
+                        <input
+                          value={manualLocationValue}
+                          onChange={(e) => setManualLocationValue(e.target.value.toUpperCase())}
+                          placeholder={`Ejemplo: ${campaign.zone}020610`}
+                        />
+                      </label>
+                      <label>
+                        Grupo
+                        <select value={manualGroupValue} onChange={(e) => setManualGroupValue(e.target.value)}>
+                          <option value="">Sin grupo</option>
+                          {groupOptions.map((group) => <option key={group} value={group}>{group}</option>)}
+                        </select>
+                      </label>
+                      <div className="button-row">
+                        <button className="primary-button" type="button" onClick={() => addDiscoveredLocation(campaign)}><Plus size={16} /> Crear ubicación</button>
+                        <button className="secondary-button" type="button" onClick={() => setManualFormCampaignId('')}><X size={16} /> Cancelar</button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="location-grid">
                   {campaign.locations.map((location) => (
                     <button
                       key={location.id}
@@ -170,7 +238,8 @@ export default function CounterDashboard({ user, onOpenCount }) {
                       </span>
                     </button>
                   ))}
-                </div>
+                  </div>
+                </>
               )}
             </div>
           );

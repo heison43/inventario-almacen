@@ -1,5 +1,5 @@
 import { openDB } from 'idb';
-import { uid } from './utils.js';
+import { deriveZoneFromLocation, uid } from './utils.js';
 
 const DB_NAME = 'inventario-almacen-db';
 const DB_VERSION = 8;
@@ -282,6 +282,51 @@ export async function updateLocationsBulk(updates = []) {
 
   await tx.done;
   return updatedRows;
+}
+
+
+export async function createDiscoveredLocation({ campaign, location, assignedGroup = '', userEmail = '' }) {
+  const cleanLocation = String(location || '').trim().toUpperCase();
+  if (!campaign?.id) return { ok: false, message: 'No se recibió campaña válida.' };
+  if (!cleanLocation) return { ok: false, message: 'Debes ingresar la ubicación encontrada.' };
+
+  const campaignZone = String(campaign.zone || '').trim().toUpperCase();
+  const derivedZone = deriveZoneFromLocation(cleanLocation, campaignZone);
+  if (campaignZone && derivedZone !== campaignZone) {
+    return {
+      ok: false,
+      message: `La ubicación ${cleanLocation} pertenece a la zona ${derivedZone}, pero la campaña es zona ${campaignZone}.`
+    };
+  }
+
+  const existingLocations = await listLocations(campaign.id);
+  const existing = existingLocations.find((row) => String(row.location || '').trim().toUpperCase() === cleanLocation);
+  if (existing) {
+    return { ok: true, existing: true, location: existing, message: `La ubicación ${cleanLocation} ya existe en esta campaña.` };
+  }
+
+  const warehouse = String(campaign.warehouse || '').trim();
+  const now = new Date().toISOString();
+  const safeLocationId = `loc_found_${campaign.id}_${cleanLocation}`.replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 180);
+  const record = {
+    id: safeLocationId,
+    campaign_id: campaign.id,
+    warehouse,
+    zone: derivedZone,
+    location: cleanLocation,
+    location_key: [campaign.id, warehouse, derivedZone, cleanLocation].join('::'),
+    assigned_to: String(userEmail || '').trim().toLowerCase() || null,
+    assigned_group: assignedGroup && assignedGroup !== 'todos' ? assignedGroup : null,
+    status: 'pendiente',
+    finished_at: null,
+    created_at: now,
+    updated_at: now,
+    created_from_physical: true,
+    sync_status: 'pending'
+  };
+
+  await saveLocations([record]);
+  return { ok: true, existing: false, location: record, message: `Ubicación encontrada ${cleanLocation} agregada. Ingresa a la tarjeta y agrega los códigos físicos.` };
 }
 
 export async function listPendingLocations() {
