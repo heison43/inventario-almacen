@@ -1,10 +1,12 @@
-import { Download, RefreshCw, Search } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { ChevronLeft, ChevronRight, Download, RefreshCw, Search } from 'lucide-react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { listCampaigns, listLocations } from '../lib/db.js';
 import { buildReconciliation, exportReconciliationXlsx } from '../lib/reconciliation.js';
 import { formatNumber, statusLabel } from '../lib/utils.js';
 import { isSupabaseConfigured } from '../lib/supabaseClient.js';
 import { pullFromSupabase } from '../lib/remoteSync.js';
+
+const DEFAULT_PAGE_SIZE = 50;
 
 export default function ReconciliationPage({ selectedCampaignId }) {
   const [campaigns, setCampaigns] = useState([]);
@@ -16,8 +18,12 @@ export default function ReconciliationPage({ selectedCampaignId }) {
   const [locationFilter, setLocationFilter] = useState('todos');
   const [locations, setLocations] = useState([]);
   const [query, setQuery] = useState('');
+  const deferredQuery = useDeferredValue(query);
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   useEffect(() => { loadCampaigns(); }, []);
 
@@ -34,71 +40,107 @@ export default function ReconciliationPage({ selectedCampaignId }) {
   }, [campaignMode, campaigns, selectedCampaignIds]);
 
   useEffect(() => {
-    if (campaigns.length) loadReconciliation(activeCampaignIds);
+    if (campaigns.length) loadReconciliation(activeCampaignIds, campaigns);
   }, [campaigns, activeCampaignIds.join('|')]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [statusFilter, locationFilter, deferredQuery, pageSize, activeCampaignIds.join('|')]);
 
   async function loadCampaigns() {
     setLoading(true);
-    if (isSupabaseConfigured) {
-      const pulled = await pullFromSupabase();
-      if (!pulled.ok) setMessage(`Aviso Supabase: ${pulled.message}`);
+    try {
+      const campaignRows = await listCampaigns();
+      setCampaigns(campaignRows);
+      if (!selectedCampaignId && !selectedCampaignIds.length) setCampaignMode('all');
+    } catch (error) {
+      setMessage(error?.message || 'No fue posible cargar las campañas locales.');
+    } finally {
+      setLoading(false);
     }
-    const campaignRows = await listCampaigns();
-    setCampaigns(campaignRows);
-    if (!selectedCampaignId && !selectedCampaignIds.length) {
-      setCampaignMode('all');
-    }
-    setLoading(false);
   }
 
-  async function loadReconciliation(ids = activeCampaignIds) {
+  async function loadReconciliation(ids = activeCampaignIds, sourceCampaigns = campaigns) {
     const validIds = (ids || []).filter(Boolean);
     if (!validIds.length) {
       setRows([]);
-      setSummary({ total: 0, ok: 0, faltante: 0, sobrante: 0, pendiente: 0, encontrado: 0 });
+      setSummary(emptySummary());
       setLocations([]);
       return;
     }
 
     setLoading(true);
-    if (isSupabaseConfigured) {
-      const pulled = await pullFromSupabase();
-      if (!pulled.ok) setMessage(`Aviso Supabase: ${pulled.message}`);
+    try {
+      const campaignMap = new Map(sourceCampaigns.map((campaign) => [campaign.id, campaign]));
+      const results = [];
+
+      // Se procesa campaña por campaña para evitar picos de memoria en celulares.
+      for (const id of validIds) {
+        const [result, campaignLocations] = await Promise.all([
+          buildReconciliation(id),
+          listLocations(id)
+        ]);
+        const campaign = campaignMap.get(id);
+        results.push({
+          id,
+          rows: result.rows.map((row) => ({
+            ...row,
+            campaign_id: id,
+            campaign_name: campaign?.name || id
+          })),
+          locations: campaignLocations
+        });
+      }
+
+      const allRows = results.flatMap((result) => result.rows);
+      const allLocations = results.flatMap((result) => result.locations);
+      const uniqueLocations = Array.from(new Set(allLocations.map((location) => location.location))).sort();
+
+      const nextSummary = allRows.reduce(
+        (acc, row) => {
+          acc.total += 1;
+          acc[row.status] = (acc[row.status] || 0) + 1;
+          return acc;
+        },
+        emptySummary()
+      );
+
+      setRows(allRows);
+      setSummary(nextSummary);
+      setLocations(uniqueLocations);
+      setLocationFilter('todos');
+      setCurrentPage(1);
+    } catch (error) {
+      setMessage(error?.message || 'No fue posible construir la conciliación local.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function refreshFromSupabase() {
+    if (!isSupabaseConfigured) {
+      setMessage('Supabase no está configurado. Se conserva la información local disponible.');
+      return;
     }
 
-    const campaignMap = new Map(campaigns.map((campaign) => [campaign.id, campaign]));
-    const results = await Promise.all(validIds.map(async (id) => {
-      const [result, campaignLocations] = await Promise.all([buildReconciliation(id), listLocations(id)]);
-      const campaign = campaignMap.get(id);
-      return {
-        id,
-        rows: result.rows.map((row) => ({
-          ...row,
-          campaign_id: id,
-          campaign_name: campaign?.name || id
-        })),
-        locations: campaignLocations
-      };
-    }));
+    setRefreshing(true);
+    setMessage('Actualizando la base local desde Supabase...');
+    try {
+      const pulled = await pullFromSupabase();
+      if (!pulled.ok) {
+        setMessage(`Aviso Supabase: ${pulled.message}`);
+        return;
+      }
 
-    const allRows = results.flatMap((result) => result.rows);
-    const allLocations = results.flatMap((result) => result.locations);
-    const uniqueLocations = Array.from(new Set(allLocations.map((location) => location.location))).sort();
-
-    const nextSummary = allRows.reduce(
-      (acc, row) => {
-        acc.total += 1;
-        acc[row.status] = (acc[row.status] || 0) + 1;
-        return acc;
-      },
-      { total: 0, ok: 0, faltante: 0, sobrante: 0, pendiente: 0, encontrado: 0 }
-    );
-
-    setRows(allRows);
-    setSummary(nextSummary);
-    setLocations(uniqueLocations);
-    setLocationFilter('todos');
-    setLoading(false);
+      const campaignRows = await listCampaigns();
+      setCampaigns(campaignRows);
+      // El cambio de campañas dispara una sola reconstrucción local mediante el efecto.
+      setMessage('Base local actualizada correctamente.');
+    } catch (error) {
+      setMessage(error?.message || 'No fue posible actualizar la base local.');
+    } finally {
+      setRefreshing(false);
+    }
   }
 
   function toggleCampaign(campaignId) {
@@ -114,32 +156,50 @@ export default function ReconciliationPage({ selectedCampaignId }) {
   }
 
   const filteredRows = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = deferredQuery.trim().toLowerCase();
     return rows.filter((row) => {
       const statusOk = statusFilter === 'todos' || row.status === statusFilter;
       const locationOk = locationFilter === 'todos' || row.location === locationFilter;
-      const queryOk = !q || [row.campaign_name, row.material_code, row.material_name, row.material_name_cn, row.location, row.warehouse, row.zone, row.department]
-        .join(' ')
-        .toLowerCase()
-        .includes(q);
+      const queryOk = !q || [
+        row.campaign_name,
+        row.material_code,
+        row.material_name,
+        row.material_name_cn,
+        row.location,
+        row.warehouse,
+        row.zone,
+        row.department
+      ].join(' ').toLowerCase().includes(q);
       return statusOk && locationOk && queryOk;
     });
-  }, [rows, statusFilter, locationFilter, query]);
+  }, [rows, statusFilter, locationFilter, deferredQuery]);
+
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const safePage = Math.min(currentPage, pageCount);
+  const pageRows = useMemo(() => {
+    const start = (safePage - 1) * pageSize;
+    return filteredRows.slice(start, start + pageSize);
+  }, [filteredRows, safePage, pageSize]);
 
   return (
     <section className="panel-card wide-card">
       <div className="section-title">
         <div>
           <h2>Conciliación de inventario</h2>
-          <p>Comparativo por código totalizado en cada ubicación. Puedes exportar todas las campañas o solo las seleccionadas.</p>
+          <p>Comparativo por código totalizado en cada ubicación. La tabla se muestra por páginas para evitar que el navegador se sature.</p>
         </div>
         <div className="button-row">
-          <button className="secondary-button" onClick={loadCampaigns} disabled={loading}><RefreshCw size={16} /> {loading ? 'Actualizando...' : 'Actualizar'}</button>
-          <button className="primary-button" onClick={() => exportReconciliationXlsx(filteredRows)}><Download size={16} /> Exportar Excel</button>
+          <button className="secondary-button" onClick={refreshFromSupabase} disabled={refreshing || loading}>
+            <RefreshCw size={16} /> {refreshing ? 'Actualizando base...' : 'Actualizar base'}
+          </button>
+          <button className="primary-button" onClick={() => exportReconciliationXlsx(filteredRows)} disabled={!filteredRows.length}>
+            <Download size={16} /> Exportar Excel
+          </button>
         </div>
       </div>
 
       {message && <div className="info-box">{message}</div>}
+      {loading && <div className="info-box">Preparando conciliación local. No cierres la página...</div>}
 
       <div className="form-grid three-cols">
         <label>
@@ -206,6 +266,21 @@ export default function ReconciliationPage({ selectedCampaignId }) {
         <Stat label="Nuevos" value={summary.encontrado || 0} />
       </div>
 
+      <div className="table-toolbar">
+        <span>
+          Mostrando <strong>{filteredRows.length ? ((safePage - 1) * pageSize) + 1 : 0}</strong>–<strong>{Math.min(safePage * pageSize, filteredRows.length)}</strong> de <strong>{formatNumber(filteredRows.length)}</strong> registros filtrados
+        </span>
+        <label>
+          Filas por página
+          <select value={pageSize} onChange={(event) => setPageSize(Number(event.target.value))}>
+            <option value="25">25</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+            <option value="250">250</option>
+          </select>
+        </label>
+      </div>
+
       <div className="responsive-table">
         <table>
           <thead>
@@ -230,7 +305,7 @@ export default function ReconciliationPage({ selectedCampaignId }) {
             </tr>
           </thead>
           <tbody>
-            {filteredRows.map((row, index) => (
+            {pageRows.length ? pageRows.map((row, index) => (
               <tr key={`${row.campaign_id}-${row.material_code}-${row.batch}-${row.location}-${index}`}>
                 <td>{row.campaign_name || ''}</td>
                 <td>{row.warehouse}</td>
@@ -250,12 +325,28 @@ export default function ReconciliationPage({ selectedCampaignId }) {
                 <td>{row.condition_qty ?? ''}</td>
                 <td>{row.comment || ''}</td>
               </tr>
-            ))}
+            )) : (
+              <tr><td colSpan="17" className="empty-cell">No hay registros para los filtros seleccionados.</td></tr>
+            )}
           </tbody>
         </table>
       </div>
+
+      <div className="pagination-controls">
+        <button className="secondary-button" type="button" onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} disabled={safePage <= 1}>
+          <ChevronLeft size={16} /> Anterior
+        </button>
+        <span>Página <strong>{safePage}</strong> de <strong>{pageCount}</strong></span>
+        <button className="secondary-button" type="button" onClick={() => setCurrentPage((page) => Math.min(pageCount, page + 1))} disabled={safePage >= pageCount}>
+          Siguiente <ChevronRight size={16} />
+        </button>
+      </div>
     </section>
   );
+}
+
+function emptySummary() {
+  return { total: 0, ok: 0, faltante: 0, sobrante: 0, pendiente: 0, encontrado: 0 };
 }
 
 function conditionLabel(value) {

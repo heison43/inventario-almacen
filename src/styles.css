@@ -566,3 +566,88 @@ tr.selected-row td:first-child { box-shadow: inset 4px 0 0 #0284c7; }
   .manual-location-panel { grid-template-columns: 1fr; }
 }
 .inline-empty { margin: 0; }
+
+/* v21 - consulta rápida y conciliación paginada */
+.quick-lookup-page { display: grid; gap: 16px; }
+.quick-search-box {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: #f8fafc;
+}
+.quick-search-box > label {
+  font-weight: 900;
+  color: #334155;
+}
+.quick-search-row {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+}
+.quick-search-input input {
+  min-height: 48px;
+  font-size: 1rem;
+  font-weight: 800;
+}
+.quick-search-box small { color: var(--muted); }
+.quick-result-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 16px;
+  padding-top: 4px;
+}
+.quick-result-heading > div { display: grid; gap: 2px; }
+.quick-result-heading span,
+.quick-result-heading small { color: var(--muted); }
+.quick-result-heading strong { font-size: 1.35rem; }
+.quick-result-table { max-height: 58vh; }
+.empty-cell {
+  text-align: center;
+  padding: 28px !important;
+  color: var(--muted);
+  font-weight: 750;
+}
+.table-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 12px;
+  margin: 14px 0 10px;
+  color: #475569;
+}
+.table-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.table-toolbar select {
+  width: auto;
+  min-width: 90px;
+  padding: 9px 12px;
+}
+.pagination-controls {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 14px;
+  margin-top: 14px;
+}
+.pagination-controls span { color: #475569; }
+
+@media (max-width: 900px) {
+  .quick-search-row { grid-template-columns: 1fr; }
+  .quick-search-row button { width: 100%; }
+  .table-toolbar { align-items: stretch; flex-direction: column; }
+  .table-toolbar label { justify-content: space-between; }
+}
+
+@media (max-width: 620px) {
+  .quick-result-heading { align-items: flex-start; flex-direction: column; }
+  .pagination-controls { flex-wrap: wrap; }
+}

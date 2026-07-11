@@ -159,3 +159,20 @@ Para que los usuarios contadores puedan crear estas ubicaciones y sincronizarlas
 `supabase/migration_v20_counter_found_locations.sql`
 
 No crea tablas nuevas. Solo ajusta la política RLS de inserción en `campaign_locations` para permitir que el contador cree ubicaciones asignadas a su propio correo.
+
+## Versión 21 - Consulta rápida y conciliación optimizada
+
+- Nuevo módulo administrativo **Consulta rápida** para buscar un código exacto sin cargar toda la conciliación.
+- La búsqueda utiliza índices de IndexedDB y muestra únicamente las campañas y ubicaciones del código consultado.
+- Botón **Actualizar base** para traer datos recientes desde Supabase una sola vez y luego consultar localmente.
+- Conciliación paginada (25, 50, 100 o 250 filas) para evitar que Chrome intente renderizar decenas de miles de registros.
+- La pantalla de conciliación ya no ejecuta una descarga completa de Supabase cada vez que se abre; trabaja con la base local y solo actualiza cuando el administrador lo solicita.
+- Actualización local automática de IndexedDB a versión 9. No requiere migración en Supabase y no elimina información offline.
+
+
+## Versión 22 - Consulta rápida para administradores y contadores
+
+- El módulo **Consulta rápida** ahora aparece tanto en el panel administrador como en el panel contador.
+- Conserva la misma búsqueda exacta por código, el resumen, el detalle por campaña/ubicación y la exportación del resultado.
+- Cada usuario consulta la información disponible para su cuenta y en su base local, manteniendo las reglas actuales de acceso.
+- No requiere migración nueva en Supabase y no modifica conteos, campañas ni datos offline.

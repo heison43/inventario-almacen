@@ -2,7 +2,7 @@ import { openDB } from 'idb';
 import { deriveZoneFromLocation, uid } from './utils.js';
 
 const DB_NAME = 'inventario-almacen-db';
-const DB_VERSION = 8;
+const DB_VERSION = 9;
 
 export const DEFAULT_LOCAL_USERS = [
   { id: 'usr_admin_demo', name: 'Heison Yepes', email: 'heison@empresa.com', role: 'admin', active: true, sync_status: 'local' },
@@ -48,11 +48,13 @@ function createBaseStores(db, transaction) {
   const groupCounts = getOrCreateStore(db, transaction, 'group_counts', { keyPath: 'id' });
   ensureIndex(groupCounts, 'campaign_id', 'campaign_id');
   ensureIndex(groupCounts, 'location_id', 'location_id');
+  ensureIndex(groupCounts, 'material_code', 'material_code');
   ensureIndex(groupCounts, 'sync_status', 'sync_status');
 
   const foundItems = getOrCreateStore(db, transaction, 'found_items', { keyPath: 'id' });
   ensureIndex(foundItems, 'campaign_id', 'campaign_id');
   ensureIndex(foundItems, 'location_id', 'location_id');
+  ensureIndex(foundItems, 'material_code', 'material_code');
   ensureIndex(foundItems, 'sync_status', 'sync_status');
 
   const users = getOrCreateStore(db, transaction, 'users', { keyPath: 'id' });
@@ -337,6 +339,45 @@ export async function listPendingLocations() {
 export async function saveSnapshotItems(items) {
   const rows = items.map((item) => ({ ...item, sync_status: item.sync_status || 'pending' }));
   return putMany('snapshot', rows);
+}
+
+
+
+export async function findSnapshotByMaterialCode(materialCode) {
+  const db = await getDB();
+  const code = String(materialCode || '').trim();
+  if (!code) return [];
+  return db.getAllFromIndex('snapshot', 'material_code', code);
+}
+
+export async function findGroupCountsByMaterialCode(materialCode) {
+  const db = await getDB();
+  const code = String(materialCode || '').trim();
+  if (!code) return [];
+  return db.getAllFromIndex('group_counts', 'material_code', code);
+}
+
+export async function findFoundItemsByMaterialCode(materialCode) {
+  const db = await getDB();
+  const code = String(materialCode || '').trim();
+  if (!code) return [];
+  return db.getAllFromIndex('found_items', 'material_code', code);
+}
+
+export async function getLocationsByIds(ids = []) {
+  const uniqueIds = Array.from(new Set((ids || []).filter(Boolean)));
+  if (!uniqueIds.length) return [];
+  const db = await getDB();
+  const rows = await Promise.all(uniqueIds.map((id) => db.get('locations', id)));
+  return rows.filter(Boolean);
+}
+
+export async function getCampaignsByIds(ids = []) {
+  const uniqueIds = Array.from(new Set((ids || []).filter(Boolean)));
+  if (!uniqueIds.length) return [];
+  const db = await getDB();
+  const rows = await Promise.all(uniqueIds.map((id) => db.get('campaigns', id)));
+  return rows.filter(Boolean);
 }
 
 export async function listSnapshotByLocation(locationId) {

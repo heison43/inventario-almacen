@@ -5,6 +5,7 @@ import CountPage from './pages/CountPage.jsx';
 import CounterDashboard from './pages/CounterDashboard.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import ReconciliationPage from './pages/ReconciliationPage.jsx';
+import QuickLookupPage from './pages/QuickLookupPage.jsx';
 import UsersPage from './pages/UsersPage.jsx';
 import { getCurrentProfile, signOut } from './lib/authService.js';
 import { isSupabaseConfigured } from './lib/supabaseClient.js';
@@ -105,6 +106,7 @@ export default function App() {
         />
       )}
       {view === 'reconciliation' && <ReconciliationPage selectedCampaignId={selectedCampaignId} />}
+      {view === 'quick-lookup' && <QuickLookupPage user={user} />}
       {view === 'users' && <UsersPage />}
     </Layout>
   );

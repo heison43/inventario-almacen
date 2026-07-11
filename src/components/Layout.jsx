@@ -1,4 +1,4 @@
-import { BarChart3, ClipboardList, LogOut, Menu, RefreshCw, ShieldCheck, UploadCloud, Users } from 'lucide-react';
+import { BarChart3, ClipboardList, LogOut, Menu, RefreshCw, Search, ShieldCheck, UploadCloud, Users } from 'lucide-react';
 import { useState } from 'react';
 
 export default function Layout({ user, view, setView, onLogout, onSync, syncMessage, onlineMode, children }) {
@@ -9,11 +9,13 @@ export default function Layout({ user, view, setView, onLogout, onSync, syncMess
     ? [
         { id: 'admin', label: 'Campañas', icon: UploadCloud },
         { id: 'reconciliation', label: 'Conciliación', icon: BarChart3 },
+        { id: 'quick-lookup', label: 'Consulta rápida', icon: Search },
         { id: 'counter', label: 'Conteo', icon: ClipboardList },
         { id: 'users', label: 'Usuarios', icon: Users }
       ]
     : [
-        { id: 'counter', label: 'Conteo', icon: ClipboardList }
+        { id: 'counter', label: 'Conteo', icon: ClipboardList },
+        { id: 'quick-lookup', label: 'Consulta rápida', icon: Search }
       ];
 
   async function handleSync() {
@@ -100,6 +102,7 @@ function titleByView(view) {
     admin: 'Panel administrativo',
     counter: 'Conteo físico',
     reconciliation: 'Conciliación',
+    'quick-lookup': 'Consulta rápida',
     users: 'Usuarios'
   };
   return titles[view] || 'Inventario Almacén';
