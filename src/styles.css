@@ -178,7 +178,19 @@ input:focus, select:focus { outline: 3px solid var(--accent-soft); border-color:
 .search-box input, .input-with-icon input { border: 0; }
 .search-box input:focus, .input-with-icon input:focus { outline: none; }
 
-.responsive-table { overflow: auto; border: 1px solid var(--border); border-radius: 18px; }
+.responsive-table {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x pan-y;
+  scrollbar-gutter: stable;
+}
 table { width: 100%; border-collapse: collapse; font-size: .92rem; }
 th { background: #f1f5f9; text-align: left; color: #334155; position: sticky; top: 0; z-index: 1; }
 th, td { padding: 11px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
@@ -605,6 +617,7 @@ tr.selected-row td:first-child { box-shadow: inset 4px 0 0 #0284c7; }
 .quick-result-heading small { color: var(--muted); }
 .quick-result-heading strong { font-size: 1.35rem; }
 .quick-result-table { max-height: 58vh; }
+.quick-result-table table { min-width: 1480px; }
 .empty-cell {
   text-align: center;
   padding: 28px !important;
@@ -650,6 +663,64 @@ tr.selected-row td:first-child { box-shadow: inset 4px 0 0 #0284c7; }
 @media (max-width: 620px) {
   .quick-result-heading { align-items: flex-start; flex-direction: column; }
   .pagination-controls { flex-wrap: wrap; }
+}
+
+
+/* v25 - desplazamiento horizontal visible en pantallas pequeñas */
+.horizontal-scroll-area {
+  position: relative;
+  cursor: grab;
+}
+.horizontal-scroll-area:active { cursor: grabbing; }
+.horizontal-scroll-area:focus-visible {
+  outline: 3px solid var(--accent-soft);
+  outline-offset: 2px;
+}
+.horizontal-scroll-area::-webkit-scrollbar {
+  height: 13px;
+  width: 13px;
+}
+.horizontal-scroll-area::-webkit-scrollbar-track {
+  background: #e2e8f0;
+  border-radius: 999px;
+  margin: 0 10px;
+}
+.horizontal-scroll-area::-webkit-scrollbar-thumb {
+  background: #64748b;
+  border: 3px solid #e2e8f0;
+  border-radius: 999px;
+}
+.horizontal-scroll-area::-webkit-scrollbar-thumb:hover { background: #334155; }
+.horizontal-scroll-area {
+  scrollbar-width: auto;
+  scrollbar-color: #64748b #e2e8f0;
+}
+.scroll-hint {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 0 0 7px;
+  padding: 7px 10px;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  background: #eff6ff;
+  color: #1e40af;
+  font-size: .78rem;
+  font-weight: 850;
+  text-align: center;
+}
+.scroll-hint span { font-size: 1rem; line-height: 1; }
+.scroll-hint.compact { margin-top: 2px; }
+
+@media (max-width: 1100px) {
+  .scroll-hint { display: flex; }
+}
+
+@media (max-width: 620px) {
+  .horizontal-scroll-area::-webkit-scrollbar { height: 15px; }
+  .mini-table { min-width: 760px; }
+  .quick-result-table table { min-width: 1480px; }
 }
 
 /* v23 - Revisión de diferencias */
@@ -737,17 +808,33 @@ tr.selected-row td:first-child { box-shadow: inset 4px 0 0 #0284c7; }
 .review-status-pill.diferencia_corregida { background: #dcfce7; color: #166534; }
 .review-status-pill.material_trasladado { background: #dbeafe; color: #1e40af; }
 .review-status-pill.no_encontrado { background: #f1f5f9; color: #334155; }
-.review-item-detail { border-top: 1px solid var(--border); background: #f8fafc; padding: 16px; display: grid; gap: 16px; }
-.review-comparison-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.review-item-detail { border-top: 1px solid var(--border); background: #f8fafc; padding: 16px; display: grid; gap: 16px; min-width: 0; }
+.review-comparison-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; min-width: 0; }
+.review-comparison-grid > * { min-width: 0; }
 .review-data-block, .review-recount-form {
   border: 1px solid var(--border);
   border-radius: 16px;
   background: #fff;
   padding: 14px;
+  min-width: 0;
+  max-width: 100%;
 }
 .review-data-block h3, .review-recount-form h3 { margin: 0 0 8px; }
 .review-data-block p { margin: 0 0 10px; color: #475569; }
-.mini-table-scroll { overflow: auto; max-height: 300px; border: 1px solid #e2e8f0; border-radius: 12px; }
+.mini-table-scroll {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: 300px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x pan-y;
+  scrollbar-gutter: stable;
+}
 .mini-table { width: 100%; border-collapse: collapse; min-width: 620px; }
 .mini-table th, .mini-table td { padding: 9px 10px; border-bottom: 1px solid #e2e8f0; font-size: .8rem; vertical-align: top; }
 .mini-table th { background: #f1f5f9; position: sticky; top: 0; z-index: 1; text-align: left; }

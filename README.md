@@ -4,7 +4,7 @@ Sistema web responsive/PWA para conteo físico y conciliación de inventario por
 
 ## Estado de esta versión
 
-Versión v24 con reconteo por múltiples ubicaciones, acceso para contadores al módulo Revisión de diferencias, consulta rápida y optimizaciones de operación.
+Versión v25 con reconteo por múltiples ubicaciones, acceso para contadores y desplazamiento horizontal visible en tablas desde pantallas pequeñas.
 
 Incluye:
 
@@ -199,3 +199,11 @@ No crea tablas nuevas. Solo ajusta la política RLS de inserción en `campaign_l
 - Los contadores pueden consultar los grupos creados y guardar reconteos.
 - Los contadores no pueden crear/eliminar grupos, reemplazar la data WMS ni exportar el consolidado.
 - Requiere ejecutar una sola vez `supabase/migration_v24_multilocation_counter_review.sql`.
+
+
+## Versión v25 - desplazamiento horizontal en pantallas pequeñas
+
+- Se agregó una barra de desplazamiento horizontal más visible en Consulta rápida y en las tablas de Revisión de diferencias.
+- En celular y pantallas pequeñas aparece la indicación “Desliza horizontalmente”.
+- Las tablas conservan todas sus columnas sin cortar la información.
+- No requiere migración nueva en Supabase.

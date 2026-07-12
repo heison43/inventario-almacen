@@ -401,7 +401,15 @@ export default function DifferenceReviewPage({ user }) {
                         <div className="review-data-block">
                           <h3>Existencia actual WMS</h3>
                           <p>Total actual: <strong>{formatNumber(item.wms_total)}</strong></p>
-                          <div className="mini-table-scroll">
+                          <div className="scroll-hint compact" aria-hidden="true">
+                            <span>←</span> Desliza para ver ubicación, cantidad y lotes <span>→</span>
+                          </div>
+                          <div
+                            className="mini-table-scroll horizontal-scroll-area"
+                            tabIndex="0"
+                            role="region"
+                            aria-label="Existencia actual WMS; desplázate horizontalmente para ver todas las columnas"
+                          >
                             <table className="mini-table">
                               <thead><tr><th>Almacén</th><th>Ubicación</th><th>Cantidad</th><th>Lotes</th></tr></thead>
                               <tbody>
@@ -421,7 +429,15 @@ export default function DifferenceReviewPage({ user }) {
                         <div className="review-data-block">
                           <h3>Historial del inventario físico</h3>
                           <p>Sistema corte: <strong>{formatNumber(item.inventory_summary?.system_qty || 0)}</strong> · Físico: <strong>{formatNumber(item.inventory_summary?.physical_qty || 0)}</strong></p>
-                          <div className="mini-table-scroll">
+                          <div className="scroll-hint compact" aria-hidden="true">
+                            <span>←</span> Desliza para ver todo el historial del inventario <span>→</span>
+                          </div>
+                          <div
+                            className="mini-table-scroll horizontal-scroll-area"
+                            tabIndex="0"
+                            role="region"
+                            aria-label="Historial del inventario físico; desplázate horizontalmente para ver todas las columnas"
+                          >
                             <table className="mini-table">
                               <thead><tr><th>Campaña</th><th>Ubicación</th><th>Sistema</th><th>Físico</th><th>Diferencia</th><th>Comentario</th></tr></thead>
                               <tbody>

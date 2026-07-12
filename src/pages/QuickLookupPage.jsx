@@ -138,7 +138,15 @@ export default function QuickLookupPage({ user }) {
             <Stat label="Encontrados nuevos" value={summary.found} />
           </div>
 
-          <div className="responsive-table quick-result-table">
+          <div className="scroll-hint" aria-hidden="true">
+            <span>←</span> Desliza horizontalmente para ver todas las columnas <span>→</span>
+          </div>
+          <div
+            className="responsive-table quick-result-table horizontal-scroll-area"
+            tabIndex="0"
+            role="region"
+            aria-label="Resultado de consulta rápida; desplázate horizontalmente para ver todas las columnas"
+          >
             <table>
               <thead>
                 <tr>
