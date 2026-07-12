@@ -16,6 +16,7 @@ import {
   deleteLocalCampaignCascade
 } from './db.js';
 import { isSupabaseConfigured, supabase } from './supabaseClient.js';
+import { syncReviewPendingChanges } from './reviewService.js';
 
 const PAGE_SIZE = 1000;
 const IN_FILTER_CHUNK = 120;
@@ -180,9 +181,11 @@ export async function syncPendingChanges(user) {
     await markRecordsSynced('found_items', pendingFound.map((row) => row.id));
     await clearDeletedRecords(pendingDeletes.map((row) => row.id));
 
+    const reviewSync = await syncReviewPendingChanges();
+
     return {
       ok: true,
-      message: `Sincronización lista. Conteos: ${syncedGroups}, nuevos: ${syncedFound}, eliminados: ${deletedFound}, ubicaciones: ${syncedLocations}.`
+      message: `Sincronización lista. Conteos: ${syncedGroups}, nuevos: ${syncedFound}, eliminados: ${deletedFound}, ubicaciones: ${syncedLocations}. ${reviewSync.ok ? reviewSync.message : `Revisión pendiente: ${reviewSync.message}`}`
     };
   } catch (error) {
     return { ok: false, message: error.message };

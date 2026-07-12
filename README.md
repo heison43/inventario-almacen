@@ -4,7 +4,7 @@ Sistema web responsive/PWA para conteo físico y conciliación de inventario por
 
 ## Estado de esta versión
 
-Versión v11 con solicitante visible en conteo y conciliación sin detalle de lotes.
+Versión v23 con módulo independiente de Revisión de diferencias, consulta rápida y optimizaciones de operación.
 
 Incluye:
 
@@ -25,6 +25,14 @@ Incluye:
 - Filtros por usuario, grupo, ubicación y estado.
 - Conciliación y exportación a Excel.
 - PWA configurada con manifest, service worker, favicon, apple-touch-icon e íconos de instalación.
+
+- Consulta rápida por código para administrador y contador.
+- Revisión de diferencias por grupos de códigos prioritarios.
+- Carga separada del listado a revisar y del inventario actual WMS.
+- Agrupación WMS por código + ubicación, conservando detalle de lotes.
+- Cruce con el historial del inventario físico existente.
+- Registro de segundo conteo, resultado, ubicación verificada, responsable y comentario.
+- Exportación del grupo con hojas Resumen, Detalle WMS e Historial Inventario.
 
 ## Instalación local
 
@@ -66,6 +74,8 @@ supabase/migration_v6_groups_condition_comments.sql
 supabase/migration_v7_filters_export_zone_rls.sql
 supabase/migration_v8_export_finish_zone_cards.sql
 supabase/migration_v10_plantilla_oficial.sql
+supabase/migration_v20_counter_found_locations.sql
+supabase/migration_v23_review_differences.sql
 ```
 
 Si ya tenías la v8 funcionando, ejecuta únicamente `supabase/migration_v10_plantilla_oficial.sql` para agregar el campo de descripción en chino y actualizar la vista de conciliación.

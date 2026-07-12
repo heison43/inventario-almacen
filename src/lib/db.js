@@ -2,7 +2,7 @@ import { openDB } from 'idb';
 import { deriveZoneFromLocation, uid } from './utils.js';
 
 const DB_NAME = 'inventario-almacen-db';
-const DB_VERSION = 9;
+const DB_VERSION = 10;
 
 export const DEFAULT_LOCAL_USERS = [
   { id: 'usr_admin_demo', name: 'Heison Yepes', email: 'heison@empresa.com', role: 'admin', active: true, sync_status: 'local' },
@@ -70,6 +70,31 @@ function createBaseStores(db, transaction) {
   const deletedRecords = getOrCreateStore(db, transaction, 'deleted_records', { keyPath: 'id' });
   ensureIndex(deletedRecords, 'table', 'table');
   ensureIndex(deletedRecords, 'sync_status', 'sync_status');
+
+  // Módulo v23: grupos de revisión de diferencias. Se mantiene separado
+  // de las campañas de conteo para no afectar el flujo productivo existente.
+  const reviewBatches = getOrCreateStore(db, transaction, 'review_batches', { keyPath: 'id' });
+  ensureIndex(reviewBatches, 'status', 'status');
+  ensureIndex(reviewBatches, 'created_at', 'created_at');
+  ensureIndex(reviewBatches, 'sync_status', 'sync_status');
+
+  const reviewItems = getOrCreateStore(db, transaction, 'review_items', { keyPath: 'id' });
+  ensureIndex(reviewItems, 'batch_id', 'batch_id');
+  ensureIndex(reviewItems, 'material_code', 'material_code');
+  ensureIndex(reviewItems, 'review_status', 'review_status');
+  ensureIndex(reviewItems, 'sync_status', 'sync_status');
+
+  const reviewWmsStock = getOrCreateStore(db, transaction, 'review_wms_stock', { keyPath: 'id' });
+  ensureIndex(reviewWmsStock, 'batch_id', 'batch_id');
+  ensureIndex(reviewWmsStock, 'material_code', 'material_code');
+  ensureIndex(reviewWmsStock, 'location', 'location');
+  ensureIndex(reviewWmsStock, 'sync_status', 'sync_status');
+
+  const reviewRecounts = getOrCreateStore(db, transaction, 'review_recounts', { keyPath: 'id' });
+  ensureIndex(reviewRecounts, 'batch_id', 'batch_id');
+  ensureIndex(reviewRecounts, 'item_id', 'item_id');
+  ensureIndex(reviewRecounts, 'material_code', 'material_code');
+  ensureIndex(reviewRecounts, 'sync_status', 'sync_status');
 }
 
 
@@ -650,7 +675,7 @@ export async function clearDeletedRecords(ids) {
 
 export async function clearLocalDatabase() {
   const db = await getDB();
-  const stores = ['campaigns', 'locations', 'snapshot', 'counts', 'group_counts', 'found_items', 'deleted_records'];
+  const stores = ['campaigns', 'locations', 'snapshot', 'counts', 'group_counts', 'found_items', 'deleted_records', 'review_batches', 'review_items', 'review_wms_stock', 'review_recounts'];
   const tx = db.transaction(stores, 'readwrite');
   await Promise.all(stores.map((store) => tx.objectStore(store).clear()));
   await tx.done;
@@ -697,4 +722,183 @@ export async function deleteLocalCampaignCascade(campaignId) {
     group_counts: groupCounts.length,
     found_items: foundItems.length
   };
+}
+
+
+// ---------------------------------------------------------------------------
+// v23 - Revisión de diferencias
+// ---------------------------------------------------------------------------
+
+export async function saveReviewBatch(batch) {
+  const db = await getDB();
+  const now = new Date().toISOString();
+  const record = {
+    ...batch,
+    sync_status: batch.sync_status || 'pending',
+    created_at: batch.created_at || now,
+    updated_at: now
+  };
+  await db.put('review_batches', record);
+  return record;
+}
+
+export async function saveReviewBatches(rows, options = {}) {
+  return putMany('review_batches', rows, options);
+}
+
+export async function listReviewBatches() {
+  const db = await getDB();
+  const rows = await db.getAll('review_batches');
+  return rows.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+}
+
+export async function getReviewBatch(id) {
+  const db = await getDB();
+  return db.get('review_batches', id);
+}
+
+export async function saveReviewItems(rows, options = {}) {
+  const now = new Date().toISOString();
+  return putMany('review_items', (rows || []).map((row) => ({
+    ...row,
+    sync_status: row.sync_status || 'pending',
+    created_at: row.created_at || now,
+    updated_at: row.updated_at || now
+  })), options);
+}
+
+export async function listReviewItems(batchId) {
+  const db = await getDB();
+  const rows = await db.getAllFromIndex('review_items', 'batch_id', batchId);
+  return rows.sort((a, b) => Number(a.priority || 0) - Number(b.priority || 0) || String(a.material_code).localeCompare(String(b.material_code)));
+}
+
+export async function getReviewItem(id) {
+  const db = await getDB();
+  return db.get('review_items', id);
+}
+
+export async function updateReviewItem(id, changes) {
+  const db = await getDB();
+  const current = await db.get('review_items', id);
+  if (!current) return null;
+  const updated = {
+    ...current,
+    ...changes,
+    sync_status: 'pending',
+    updated_at: new Date().toISOString()
+  };
+  await db.put('review_items', updated);
+  return updated;
+}
+
+export async function replaceReviewWmsStock(batchId, rows) {
+  const db = await getDB();
+  const tx = db.transaction('review_wms_stock', 'readwrite');
+  const existing = await tx.store.index('batch_id').getAll(batchId);
+  await Promise.all(existing.map((row) => tx.store.delete(row.id)));
+  const now = new Date().toISOString();
+  await Promise.all((rows || []).map((row) => tx.store.put({
+    ...row,
+    sync_status: row.sync_status || 'pending',
+    created_at: row.created_at || now,
+    updated_at: row.updated_at || now
+  })));
+  await tx.done;
+  return rows || [];
+}
+
+export async function saveReviewWmsStock(rows, options = {}) {
+  const now = new Date().toISOString();
+  return putMany('review_wms_stock', (rows || []).map((row) => ({
+    ...row,
+    sync_status: row.sync_status || 'pending',
+    created_at: row.created_at || now,
+    updated_at: row.updated_at || now
+  })), options);
+}
+
+export async function listReviewWmsStock(batchId) {
+  const db = await getDB();
+  const rows = await db.getAllFromIndex('review_wms_stock', 'batch_id', batchId);
+  return rows.sort((a, b) => `${a.material_code || ''}::${a.location || ''}::${a.batch || ''}`.localeCompare(`${b.material_code || ''}::${b.location || ''}::${b.batch || ''}`));
+}
+
+export async function listReviewWmsStockByMaterial(materialCode) {
+  const db = await getDB();
+  const code = String(materialCode || '').trim();
+  if (!code) return [];
+  return db.getAllFromIndex('review_wms_stock', 'material_code', code);
+}
+
+export async function saveReviewRecount(row) {
+  const db = await getDB();
+  const now = new Date().toISOString();
+  const record = {
+    ...row,
+    sync_status: row.sync_status || 'pending',
+    created_at: row.created_at || now,
+    updated_at: now
+  };
+  await db.put('review_recounts', record);
+  return record;
+}
+
+export async function saveReviewRecounts(rows, options = {}) {
+  const now = new Date().toISOString();
+  return putMany('review_recounts', (rows || []).map((row) => ({
+    ...row,
+    sync_status: row.sync_status || 'pending',
+    created_at: row.created_at || now,
+    updated_at: row.updated_at || now
+  })), options);
+}
+
+export async function listReviewRecounts(batchId) {
+  const db = await getDB();
+  return db.getAllFromIndex('review_recounts', 'batch_id', batchId);
+}
+
+export async function getReviewRecountByItem(itemId) {
+  const db = await getDB();
+  const rows = await db.getAllFromIndex('review_recounts', 'item_id', itemId);
+  return rows.sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')))[0] || null;
+}
+
+export async function listPendingReviewBatches() {
+  const db = await getDB();
+  return db.getAllFromIndex('review_batches', 'sync_status', 'pending');
+}
+
+export async function listPendingReviewItems() {
+  const db = await getDB();
+  return db.getAllFromIndex('review_items', 'sync_status', 'pending');
+}
+
+export async function listPendingReviewWmsStock() {
+  const db = await getDB();
+  return db.getAllFromIndex('review_wms_stock', 'sync_status', 'pending');
+}
+
+export async function listPendingReviewRecounts() {
+  const db = await getDB();
+  return db.getAllFromIndex('review_recounts', 'sync_status', 'pending');
+}
+
+export async function deleteLocalReviewBatchCascade(batchId) {
+  if (!batchId) return { batches: 0, items: 0, wms: 0, recounts: 0 };
+  const db = await getDB();
+  const stores = ['review_batches', 'review_items', 'review_wms_stock', 'review_recounts'];
+  const tx = db.transaction(stores, 'readwrite');
+  const [items, wms, recounts] = await Promise.all([
+    tx.objectStore('review_items').index('batch_id').getAll(batchId),
+    tx.objectStore('review_wms_stock').index('batch_id').getAll(batchId),
+    tx.objectStore('review_recounts').index('batch_id').getAll(batchId)
+  ]);
+  await tx.objectStore('review_batches').delete(batchId);
+  await Promise.all(items.map((row) => tx.objectStore('review_items').delete(row.id)));
+  await Promise.all(wms.map((row) => tx.objectStore('review_wms_stock').delete(row.id)));
+  await Promise.all(recounts.map((row) => tx.objectStore('review_recounts').delete(row.id)));
+  await tx.done;
+  return { batches: 1, items: items.length, wms: wms.length, recounts: recounts.length };
 }
