@@ -4,7 +4,7 @@ Sistema web responsive/PWA para conteo físico y conciliación de inventario por
 
 ## Estado de esta versión
 
-Versión v23 con módulo independiente de Revisión de diferencias, consulta rápida y optimizaciones de operación.
+Versión v24 con reconteo por múltiples ubicaciones, acceso para contadores al módulo Revisión de diferencias, consulta rápida y optimizaciones de operación.
 
 Incluye:
 
@@ -76,6 +76,7 @@ supabase/migration_v8_export_finish_zone_cards.sql
 supabase/migration_v10_plantilla_oficial.sql
 supabase/migration_v20_counter_found_locations.sql
 supabase/migration_v23_review_differences.sql
+supabase/migration_v24_multilocation_counter_review.sql
 ```
 
 Si ya tenías la v8 funcionando, ejecuta únicamente `supabase/migration_v10_plantilla_oficial.sql` para agregar el campo de descripción en chino y actualizar la vista de conciliación.
@@ -186,3 +187,15 @@ No crea tablas nuevas. Solo ajusta la política RLS de inserción en `campaign_l
 - Conserva la misma búsqueda exacta por código, el resumen, el detalle por campaña/ubicación y la exportación del resultado.
 - Cada usuario consulta la información disponible para su cuenta y en su base local, manteniendo las reglas actuales de acceso.
 - No requiere migración nueva en Supabase y no modifica conteos, campañas ni datos offline.
+
+
+## Versión 24 - Reconteo por múltiples ubicaciones y acceso de contadores
+
+- Un mismo código puede registrarse en dos o más ubicaciones durante la segunda revisión.
+- Cada línea guarda ubicación, cantidad recontada y una nota opcional.
+- La aplicación suma automáticamente todas las ubicaciones y calcula la diferencia confirmada contra el WMS actual.
+- Las revisiones existentes de v23 se conservan y se convierten en una primera línea de reconteo.
+- El módulo **Revisión diferencias** aparece también en el panel contador.
+- Los contadores pueden consultar los grupos creados y guardar reconteos.
+- Los contadores no pueden crear/eliminar grupos, reemplazar la data WMS ni exportar el consolidado.
+- Requiere ejecutar una sola vez `supabase/migration_v24_multilocation_counter_review.sql`.

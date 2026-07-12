@@ -47,6 +47,7 @@ export default function DifferenceReviewPage({ user }) {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [message, setMessage] = useState('');
+  const isAdmin = user?.role === 'admin';
 
   useEffect(() => {
     loadBatches();
@@ -72,8 +73,13 @@ export default function DifferenceReviewPage({ user }) {
       const result = await buildReviewBatchView(batchId);
       setView(result);
       setReviewForms(Object.fromEntries(result.items.map((item) => [item.id, {
-        recount_qty: item.recount?.recount_qty ?? '',
-        verified_location: item.recount?.verified_location || '',
+        lines: item.recount_lines?.length
+          ? item.recount_lines.map((line) => ({
+              location: line.location || '',
+              qty: line.qty ?? '',
+              line_comment: line.line_comment || ''
+            }))
+          : [{ location: '', qty: '', line_comment: '' }],
         result: item.recount?.result || 'pendiente',
         responsible: item.recount?.responsible || user?.name || user?.email || '',
         comment: item.recount?.comment || ''
@@ -167,6 +173,44 @@ export default function DifferenceReviewPage({ user }) {
     }));
   }
 
+  function updateReviewLine(itemId, lineIndex, field, value) {
+    setReviewForms((current) => {
+      const form = current[itemId] || {};
+      const lines = [...(form.lines || [{ location: '', qty: '', line_comment: '' }])];
+      lines[lineIndex] = { ...(lines[lineIndex] || {}), [field]: value };
+      return { ...current, [itemId]: { ...form, lines } };
+    });
+  }
+
+  function addReviewLine(itemId) {
+    setReviewForms((current) => {
+      const form = current[itemId] || {};
+      const lines = [...(form.lines || []), { location: '', qty: '', line_comment: '' }];
+      return { ...current, [itemId]: { ...form, lines } };
+    });
+  }
+
+  function removeReviewLine(itemId, lineIndex) {
+    setReviewForms((current) => {
+      const form = current[itemId] || {};
+      const lines = (form.lines || []).filter((_, index) => index !== lineIndex);
+      return {
+        ...current,
+        [itemId]: {
+          ...form,
+          lines: lines.length ? lines : [{ location: '', qty: '', line_comment: '' }]
+        }
+      };
+    });
+  }
+
+  function recountTotal(itemId) {
+    return (reviewForms[itemId]?.lines || []).reduce((sum, line) => {
+      if (line.qty === '' || line.qty === null || line.qty === undefined) return sum;
+      return sum + Number(line.qty || 0);
+    }, 0);
+  }
+
   async function saveReview(item) {
     const values = reviewForms[item.id] || {};
     setLoading(true);
@@ -204,15 +248,17 @@ export default function DifferenceReviewPage({ user }) {
             <button className="secondary-button" onClick={refreshRemote} disabled={refreshing || loading}>
               <RefreshCw size={16} /> {refreshing ? 'Actualizando...' : 'Actualizar grupos'}
             </button>
-            <button className="primary-button" onClick={() => setShowCreate((current) => !current)}>
-              <Plus size={16} /> Nuevo grupo
-            </button>
+            {isAdmin && (
+              <button className="primary-button" onClick={() => setShowCreate((current) => !current)}>
+                <Plus size={16} /> Nuevo grupo
+              </button>
+            )}
           </div>
         </div>
 
         {message && <div className="info-box">{message}</div>}
 
-        {showCreate && (
+        {isAdmin && showCreate && (
           <form className="review-create-card" onSubmit={createBatch}>
             <div className="form-grid three-cols">
               <label>
@@ -284,19 +330,21 @@ export default function DifferenceReviewPage({ user }) {
               <h2>{view.batch.name}</h2>
               <p>{reviewTypeLabel(view.batch.review_type)} · WMS con corte {formatDate(view.batch.wms_cut_at)} · Responsable: {view.batch.responsible || 'Sin definir'}</p>
             </div>
-            <div className="button-row">
-              <label className="compact-file-button secondary-button">
-                <UploadCloud size={16} /> {replaceWmsFile ? replaceWmsFile.name : 'Nueva data WMS'}
-                <input type="file" accept=".xlsx,.xls,.csv" onChange={(event) => setReplaceWmsFile(event.target.files?.[0] || null)} />
-              </label>
-              <button className="secondary-button" onClick={updateWms} disabled={!replaceWmsFile || loading}>Actualizar WMS</button>
-              <button className="secondary-button" onClick={() => exportReviewBatchXlsx(view.batch.id)} disabled={loading}>
-                <Download size={16} /> Exportar grupo
-              </button>
-              <button className="danger-button" onClick={() => removeBatch(view.batch)} disabled={loading}>
-                <Trash2 size={16} /> Eliminar
-              </button>
-            </div>
+            {isAdmin && (
+              <div className="button-row">
+                <label className="compact-file-button secondary-button">
+                  <UploadCloud size={16} /> {replaceWmsFile ? replaceWmsFile.name : 'Nueva data WMS'}
+                  <input type="file" accept=".xlsx,.xls,.csv" onChange={(event) => setReplaceWmsFile(event.target.files?.[0] || null)} />
+                </label>
+                <button className="secondary-button" onClick={updateWms} disabled={!replaceWmsFile || loading}>Actualizar WMS</button>
+                <button className="secondary-button" onClick={() => exportReviewBatchXlsx(view.batch.id)} disabled={loading}>
+                  <Download size={16} /> Exportar grupo
+                </button>
+                <button className="danger-button" onClick={() => removeBatch(view.batch)} disabled={loading}>
+                  <Trash2 size={16} /> Eliminar
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="stats-grid six-cols">
@@ -343,7 +391,7 @@ export default function DifferenceReviewPage({ user }) {
                     <Metric label="Diferencia listado" value={formatNumber(item.expected_difference)} />
                     <Metric label="WMS actual" value={formatNumber(item.wms_total)} />
                     <Metric label="Físico inventario" value={formatNumber(item.inventory_summary?.physical_qty || 0)} />
-                    <Metric label="Brecha actual" value={formatSigned(item.current_difference)} emphasis />
+                    <Metric label={item.recount ? "Diferencia revisión" : "Referencia histórica"} value={formatSigned(item.current_difference)} emphasis />
                     <span className={`review-status-pill ${item.recount?.result || 'pendiente'}`}>{resultLabel(item.recount?.result || 'pendiente')}</span>
                   </button>
 
@@ -394,16 +442,65 @@ export default function DifferenceReviewPage({ user }) {
                       </div>
 
                       <div className="review-recount-form">
-                        <h3>Segunda revisión</h3>
-                        <div className="form-grid five-cols">
-                          <label>
-                            Cantidad recontada
-                            <input type="number" step="any" value={reviewForms[item.id]?.recount_qty ?? ''} onChange={(event) => updateReviewForm(item.id, 'recount_qty', event.target.value)} />
-                          </label>
-                          <label>
-                            Ubicación verificada
-                            <input value={reviewForms[item.id]?.verified_location || ''} onChange={(event) => updateReviewForm(item.id, 'verified_location', event.target.value.toUpperCase())} placeholder="Ubicación real" />
-                          </label>
+                        <div className="review-recount-heading">
+                          <div>
+                            <h3>Segunda revisión</h3>
+                            <p>Registra una línea por cada ubicación física donde verificaste el código.</p>
+                          </div>
+                          <button className="secondary-button compact-button" type="button" onClick={() => addReviewLine(item.id)}>
+                            <Plus size={15} /> Agregar ubicación
+                          </button>
+                        </div>
+
+                        <div className="recount-lines">
+                          {(reviewForms[item.id]?.lines || [{ location: '', qty: '', line_comment: '' }]).map((line, lineIndex) => (
+                            <div className="recount-line" key={`${item.id}-line-${lineIndex}`}>
+                              <span className="recount-line-number">{lineIndex + 1}</span>
+                              <label>
+                                Ubicación verificada
+                                <input
+                                  value={line.location || ''}
+                                  onChange={(event) => updateReviewLine(item.id, lineIndex, 'location', event.target.value.toUpperCase())}
+                                  placeholder="Ubicación real"
+                                />
+                              </label>
+                              <label>
+                                Cantidad recontada
+                                <input
+                                  type="number"
+                                  step="any"
+                                  value={line.qty ?? ''}
+                                  onChange={(event) => updateReviewLine(item.id, lineIndex, 'qty', event.target.value)}
+                                  placeholder="0"
+                                />
+                              </label>
+                              <label>
+                                Nota de la ubicación
+                                <input
+                                  value={line.line_comment || ''}
+                                  onChange={(event) => updateReviewLine(item.id, lineIndex, 'line_comment', event.target.value)}
+                                  placeholder="Opcional"
+                                />
+                              </label>
+                              <button
+                                className="icon-button danger-icon"
+                                type="button"
+                                onClick={() => removeReviewLine(item.id, lineIndex)}
+                                title="Quitar esta ubicación"
+                              >
+                                <Trash2 size={17} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="recount-total-bar">
+                          <span>Total recontado en todas las ubicaciones</span>
+                          <strong>{formatNumber(recountTotal(item.id))}</strong>
+                          <small>Diferencia confirmada: {formatSigned(recountTotal(item.id) - Number(item.wms_total || 0))}</small>
+                        </div>
+
+                        <div className="form-grid three-cols review-result-grid">
                           <label>
                             Resultado
                             <select value={reviewForms[item.id]?.result || 'pendiente'} onChange={(event) => updateReviewForm(item.id, 'result', event.target.value)}>
@@ -419,13 +516,13 @@ export default function DifferenceReviewPage({ user }) {
                             Responsable
                             <input value={reviewForms[item.id]?.responsible || ''} onChange={(event) => updateReviewForm(item.id, 'responsible', event.target.value)} />
                           </label>
-                          <label className="wide-field">
-                            Comentario
+                          <label>
+                            Comentario general
                             <input value={reviewForms[item.id]?.comment || ''} onChange={(event) => updateReviewForm(item.id, 'comment', event.target.value)} placeholder="Hallazgo o acción realizada" />
                           </label>
                         </div>
                         <div className="review-save-row">
-                          <span>Diferencia de revisión = reconteo − WMS actual.</span>
+                          <span>La diferencia confirmada se calcula con el total recontado menos el WMS actual.</span>
                           <button className="primary-button" type="button" onClick={() => saveReview(item)} disabled={loading}>
                             <Save size={16} /> Guardar revisión
                           </button>

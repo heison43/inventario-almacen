@@ -16,7 +16,8 @@ export default function Layout({ user, view, setView, onLogout, onSync, syncMess
       ]
     : [
         { id: 'counter', label: 'Conteo', icon: ClipboardList },
-        { id: 'quick-lookup', label: 'Consulta rápida', icon: Search }
+        { id: 'quick-lookup', label: 'Consulta rápida', icon: Search },
+        { id: 'difference-review', label: 'Revisión diferencias', icon: ClipboardCheck }
       ];
 
   async function handleSync() {

@@ -5,20 +5,25 @@ import {
   listPendingReviewBatches,
   listPendingReviewItems,
   listPendingReviewRecounts,
+  listPendingReviewRecountLines,
   listPendingReviewWmsStock,
   listReviewBatches,
   listReviewItems,
   listReviewRecounts,
+  listReviewRecountLines,
+  listReviewRecountLinesByItem,
   listReviewWmsStock,
   markRecordsSynced,
   replaceReviewWmsStock,
+  replaceReviewRecountLines,
+  replaceRemoteReviewRecountLines,
   saveReviewBatch,
   saveReviewBatches,
   saveReviewItems,
   saveReviewRecount,
   saveReviewRecounts,
-  saveReviewWmsStock,
-  updateReviewItem
+  saveReviewRecountLines,
+  saveReviewWmsStock
 } from './db.js';
 import { buildMaterialLookup } from './reconciliation.js';
 import { isSupabaseConfigured, supabase } from './supabaseClient.js';
@@ -218,7 +223,7 @@ export async function createReviewBatchFromFiles({
   await saveReviewItems(items);
   await replaceReviewWmsStock(batchId, wmsRows);
 
-  const sync = await syncReviewPendingChanges();
+  const sync = await syncReviewPendingChanges(user);
   return {
     batch,
     items,
@@ -247,7 +252,7 @@ export async function replaceReviewWmsFromFile({ batchId, wmsFile }) {
   }
   await replaceReviewWmsStock(batchId, rows);
   await saveReviewBatch({ ...batch, wms_file_name: wmsFile.name, wms_cut_at: now, sync_status: 'pending' });
-  const sync = await syncReviewPendingChanges();
+  const sync = await syncReviewPendingChanges({ role: 'admin' });
   return { rows, sync };
 }
 
@@ -269,11 +274,12 @@ function summarizeWmsForCode(rows) {
 }
 
 export async function buildReviewBatchView(batchId) {
-  const [batch, items, wmsRows, recounts] = await Promise.all([
+  const [batch, items, wmsRows, recounts, recountLines] = await Promise.all([
     getReviewBatch(batchId),
     listReviewItems(batchId),
     listReviewWmsStock(batchId),
-    listReviewRecounts(batchId)
+    listReviewRecounts(batchId),
+    listReviewRecountLines(batchId)
   ]);
   if (!batch) return { batch: null, items: [], summary: emptyBatchSummary() };
 
@@ -283,6 +289,11 @@ export async function buildReviewBatchView(batchId) {
     wmsByCode.get(row.material_code).push(row);
   }
   const recountByItem = new Map(recounts.map((row) => [row.item_id, row]));
+  const recountLinesByItem = new Map();
+  for (const row of recountLines) {
+    if (!recountLinesByItem.has(row.item_id)) recountLinesByItem.set(row.item_id, []);
+    recountLinesByItem.get(row.item_id).push(row);
+  }
 
   const enriched = await Promise.all(items.map(async (item) => {
     const inventory = await buildMaterialLookup(item.material_code);
@@ -290,7 +301,26 @@ export async function buildReviewBatchView(batchId) {
     const wmsLocations = summarizeWmsForCode(codeWmsRows);
     const wmsTotal = wmsLocations.reduce((sum, row) => sum + Number(row.qty || 0), 0);
     const recount = recountByItem.get(item.id) || null;
-    const recountQty = recount?.recount_qty;
+    let itemRecountLines = recountLinesByItem.get(item.id) || [];
+
+    // Compatibilidad con revisiones guardadas antes de v24: se muestran como una línea.
+    if (!itemRecountLines.length && recount && (recount.verified_location || recount.recount_qty !== null)) {
+      itemRecountLines = [{
+        id: `legacy_${recount.id}`,
+        batch_id: recount.batch_id,
+        item_id: recount.item_id,
+        recount_id: recount.id,
+        material_code: recount.material_code,
+        location: recount.verified_location || '',
+        qty: recount.recount_qty,
+        line_comment: '',
+        legacy: true
+      }];
+    }
+
+    const recountQty = itemRecountLines.length
+      ? itemRecountLines.reduce((sum, row) => sum + Number(row.qty || 0), 0)
+      : recount?.recount_qty;
     const currentDifference = recountQty === null || recountQty === undefined || recountQty === ''
       ? Number(inventory.summary.physical_qty || 0) - wmsTotal
       : Number(recountQty || 0) - wmsTotal;
@@ -303,6 +333,8 @@ export async function buildReviewBatchView(batchId) {
       inventory_rows: inventory.rows,
       inventory_summary: inventory.summary,
       current_difference: currentDifference,
+      recount_total: recountQty === null || recountQty === undefined || recountQty === '' ? null : Number(recountQty || 0),
+      recount_lines: itemRecountLines,
       recount
     };
   }));
@@ -315,7 +347,7 @@ export async function buildReviewBatchView(batchId) {
     acc.inventory_physical += Number(item.inventory_summary?.physical_qty || 0);
     if (item.wms_locations.length) acc.with_wms += 1;
     else acc.without_wms += 1;
-    if (item.recount) acc.reviewed += 1;
+    if (item.recount && item.recount.result && item.recount.result !== 'pendiente') acc.reviewed += 1;
     else acc.pending += 1;
     return acc;
   }, emptyBatchSummary());
@@ -339,13 +371,34 @@ function emptyBatchSummary() {
 
 export async function saveItemRecount({ item, batch, values, user }) {
   const now = new Date().toISOString();
+  const rawLines = Array.isArray(values.lines) ? values.lines : [];
+  const normalizedLines = rawLines
+    .map((line, index) => ({
+      index,
+      location: String(line.location || '').trim().toUpperCase(),
+      qty: line.qty === '' || line.qty === null || line.qty === undefined ? null : toNumber(line.qty),
+      line_comment: String(line.line_comment || '').trim()
+    }))
+    .filter((line) => line.location || line.qty !== null || line.line_comment);
+
+  for (const line of normalizedLines) {
+    if (!line.location) throw new Error('Cada línea del reconteo debe tener una ubicación.');
+    if (line.qty === null) throw new Error(`Ingresa la cantidad recontada para ${line.location}.`);
+  }
+
+  const recountId = `recount_${safeKey(item.id)}`;
+  const recountTotal = normalizedLines.length
+    ? normalizedLines.reduce((sum, line) => sum + Number(line.qty || 0), 0)
+    : null;
+  const verifiedLocations = normalizedLines.map((line) => line.location).join(' | ');
+
   const record = await saveReviewRecount({
-    id: `recount_${safeKey(item.id)}`,
+    id: recountId,
     batch_id: batch.id,
     item_id: item.id,
     material_code: item.material_code,
-    recount_qty: values.recount_qty === '' || values.recount_qty === null || values.recount_qty === undefined ? null : toNumber(values.recount_qty),
-    verified_location: String(values.verified_location || '').trim().toUpperCase(),
+    recount_qty: recountTotal,
+    verified_location: verifiedLocations,
     result: String(values.result || 'pendiente'),
     responsible: String(values.responsible || user?.name || user?.email || '').trim(),
     comment: String(values.comment || '').trim(),
@@ -355,9 +408,25 @@ export async function saveItemRecount({ item, batch, values, user }) {
     created_at: now,
     updated_at: now
   });
-  await updateReviewItem(item.id, { review_status: record.result || 'revisado' });
-  const sync = await syncReviewPendingChanges();
-  return { record, sync };
+
+  const lineRecords = normalizedLines.map((line, index) => ({
+    id: `rline_${safeKey(`${item.id}::${index + 1}::${line.location}`)}`,
+    batch_id: batch.id,
+    item_id: item.id,
+    recount_id: recountId,
+    material_code: item.material_code,
+    location: line.location,
+    qty: line.qty,
+    line_comment: line.line_comment,
+    created_by: user?.email || user?.name || 'local',
+    sync_status: 'pending',
+    created_at: now,
+    updated_at: now
+  }));
+  await replaceReviewRecountLines(item.id, lineRecords);
+
+  const sync = await syncReviewPendingChanges(user);
+  return { record, lines: lineRecords, sync };
 }
 
 function stripLocal(row) {
@@ -395,28 +464,52 @@ async function selectAll(table) {
   return all;
 }
 
-export async function syncReviewPendingChanges() {
+export async function syncReviewPendingChanges(user = null) {
   if (!isSupabaseConfigured) return { ok: false, message: 'Supabase no está configurado. La revisión quedó guardada localmente.' };
   try {
-    const [batches, items, wms, recounts] = await Promise.all([
-      listPendingReviewBatches(),
-      listPendingReviewItems(),
-      listPendingReviewWmsStock(),
-      listPendingReviewRecounts()
+    const isAdmin = user?.role === 'admin';
+    const [allBatches, allItems, allWms, recounts, pendingLines] = await Promise.all([
+      isAdmin ? listPendingReviewBatches() : Promise.resolve([]),
+      isAdmin ? listPendingReviewItems() : Promise.resolve([]),
+      isAdmin ? listPendingReviewWmsStock() : Promise.resolve([]),
+      listPendingReviewRecounts(),
+      listPendingReviewRecountLines()
     ]);
+
     const totals = {
-      batches: await upsertChunks('review_batches', batches),
-      items: await upsertChunks('review_items', items),
-      wms: await upsertChunks('review_wms_stock', wms),
-      recounts: await upsertChunks('review_recounts', recounts)
+      batches: await upsertChunks('review_batches', allBatches),
+      items: await upsertChunks('review_items', allItems),
+      wms: await upsertChunks('review_wms_stock', allWms),
+      recounts: await upsertChunks('review_recounts', recounts),
+      recount_lines: 0
     };
+
+    // Cada reconteo reemplaza el detalle remoto de su código. Así se pueden
+    // agregar, editar o quitar ubicaciones sin dejar líneas antiguas.
+    const affectedItemIds = Array.from(new Set([
+      ...recounts.map((row) => row.item_id),
+      ...pendingLines.map((row) => row.item_id)
+    ].filter(Boolean)));
+
+    for (const itemId of affectedItemIds) {
+      const { error: deleteError } = await supabase.from('review_recount_lines').delete().eq('item_id', itemId);
+      if (deleteError) throw new Error(`review_recount_lines: ${deleteError.message}`);
+      const currentLines = await listReviewRecountLinesByItem(itemId);
+      totals.recount_lines += await upsertChunks('review_recount_lines', currentLines);
+      await markRecordsSynced('review_recount_lines', currentLines.map((row) => row.id));
+    }
+
     await Promise.all([
-      markRecordsSynced('review_batches', batches.map((row) => row.id)),
-      markRecordsSynced('review_items', items.map((row) => row.id)),
-      markRecordsSynced('review_wms_stock', wms.map((row) => row.id)),
+      markRecordsSynced('review_batches', allBatches.map((row) => row.id)),
+      markRecordsSynced('review_items', allItems.map((row) => row.id)),
+      markRecordsSynced('review_wms_stock', allWms.map((row) => row.id)),
       markRecordsSynced('review_recounts', recounts.map((row) => row.id))
     ]);
-    return { ok: true, message: `Revisión sincronizada. Grupos: ${totals.batches}, códigos: ${totals.items}, WMS: ${totals.wms}, revisiones: ${totals.recounts}.`, totals };
+    return {
+      ok: true,
+      message: `Revisión sincronizada. Grupos: ${totals.batches}, códigos: ${totals.items}, WMS: ${totals.wms}, revisiones: ${totals.recounts}, ubicaciones recontadas: ${totals.recount_lines}.`,
+      totals
+    };
   } catch (error) {
     return { ok: false, message: error.message };
   }
@@ -425,17 +518,19 @@ export async function syncReviewPendingChanges() {
 export async function pullReviewFromSupabase() {
   if (!isSupabaseConfigured) return { ok: false, message: 'Supabase no está configurado.' };
   try {
-    const [batches, items, wms, recounts] = await Promise.all([
+    const [batches, items, wms, recounts, recountLines] = await Promise.all([
       selectAll('review_batches'),
       selectAll('review_items'),
       selectAll('review_wms_stock'),
-      selectAll('review_recounts')
+      selectAll('review_recounts'),
+      selectAll('review_recount_lines')
     ]);
     await saveReviewBatches(batches.map((row) => ({ ...row, sync_status: 'synced' })), { preservePending: true });
     await saveReviewItems(items.map((row) => ({ ...row, sync_status: 'synced' })), { preservePending: true });
     await saveReviewWmsStock(wms.map((row) => ({ ...row, sync_status: 'synced' })), { preservePending: true });
     await saveReviewRecounts(recounts.map((row) => ({ ...row, sync_status: 'synced' })), { preservePending: true });
-    return { ok: true, message: `Revisiones actualizadas. Grupos: ${batches.length}, códigos: ${items.length}, líneas WMS: ${wms.length}, verificaciones: ${recounts.length}.` };
+    await replaceRemoteReviewRecountLines(recountLines);
+    return { ok: true, message: `Revisiones actualizadas. Grupos: ${batches.length}, códigos: ${items.length}, líneas WMS: ${wms.length}, verificaciones: ${recounts.length}, ubicaciones recontadas: ${recountLines.length}.` };
   } catch (error) {
     return { ok: false, message: error.message };
   }
@@ -473,10 +568,10 @@ export async function exportReviewBatchXlsx(batchId) {
     FisicoInventario: item.inventory_summary?.physical_qty || 0,
     DiferenciaInventario: item.inventory_summary?.difference || 0,
     UbicacionesConteo: item.inventory_rows.map((row) => `${row.location}: ${row.physical_qty ?? ''}`).join(' | '),
-    CantidadReconteo: item.recount?.recount_qty ?? '',
+    CantidadReconteo: item.recount_total ?? '',
     DiferenciaActual: item.current_difference,
     Resultado: item.recount?.result || 'pendiente',
-    UbicacionVerificada: item.recount?.verified_location || '',
+    UbicacionesVerificadas: item.recount_lines.map((row) => `${row.location}: ${row.qty ?? ''}`).join(' | '),
     Responsable: item.recount?.responsible || '',
     Comentario: item.recount?.comment || '',
     FechaRevision: item.recount?.reviewed_at || ''
@@ -509,10 +604,23 @@ export async function exportReviewBatchXlsx(batchId) {
     Comentario: row.comment
   })));
 
+  const recountRows = view.items.flatMap((item) => item.recount_lines.map((row) => ({
+    Codigo: item.material_code,
+    Descripcion: item.material_name,
+    UbicacionVerificada: row.location,
+    CantidadRecontada: row.qty,
+    ComentarioLinea: row.line_comment || '',
+    Resultado: item.recount?.result || 'pendiente',
+    Responsable: item.recount?.responsible || '',
+    ComentarioGeneral: item.recount?.comment || '',
+    FechaRevision: item.recount?.reviewed_at || ''
+  })));
+
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(summaryRows), 'Resumen');
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(wmsRows), 'Detalle WMS');
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(inventoryRows), 'Historial Inventario');
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(recountRows), 'Detalle Reconteo');
   XLSX.writeFile(workbook, `${safeKey(view.batch.name) || 'revision-diferencias'}.xlsx`);
 }
 

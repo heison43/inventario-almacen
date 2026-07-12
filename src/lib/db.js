@@ -2,7 +2,7 @@ import { openDB } from 'idb';
 import { deriveZoneFromLocation, uid } from './utils.js';
 
 const DB_NAME = 'inventario-almacen-db';
-const DB_VERSION = 10;
+const DB_VERSION = 11;
 
 export const DEFAULT_LOCAL_USERS = [
   { id: 'usr_admin_demo', name: 'Heison Yepes', email: 'heison@empresa.com', role: 'admin', active: true, sync_status: 'local' },
@@ -95,6 +95,14 @@ function createBaseStores(db, transaction) {
   ensureIndex(reviewRecounts, 'item_id', 'item_id');
   ensureIndex(reviewRecounts, 'material_code', 'material_code');
   ensureIndex(reviewRecounts, 'sync_status', 'sync_status');
+
+  // v24: detalle del reconteo por varias ubicaciones para un mismo código.
+  const reviewRecountLines = getOrCreateStore(db, transaction, 'review_recount_lines', { keyPath: 'id' });
+  ensureIndex(reviewRecountLines, 'batch_id', 'batch_id');
+  ensureIndex(reviewRecountLines, 'item_id', 'item_id');
+  ensureIndex(reviewRecountLines, 'recount_id', 'recount_id');
+  ensureIndex(reviewRecountLines, 'material_code', 'material_code');
+  ensureIndex(reviewRecountLines, 'sync_status', 'sync_status');
 }
 
 
@@ -675,7 +683,7 @@ export async function clearDeletedRecords(ids) {
 
 export async function clearLocalDatabase() {
   const db = await getDB();
-  const stores = ['campaigns', 'locations', 'snapshot', 'counts', 'group_counts', 'found_items', 'deleted_records', 'review_batches', 'review_items', 'review_wms_stock', 'review_recounts'];
+  const stores = ['campaigns', 'locations', 'snapshot', 'counts', 'group_counts', 'found_items', 'deleted_records', 'review_batches', 'review_items', 'review_wms_stock', 'review_recounts', 'review_recount_lines'];
   const tx = db.transaction(stores, 'readwrite');
   await Promise.all(stores.map((store) => tx.objectStore(store).clear()));
   await tx.done;
@@ -885,20 +893,94 @@ export async function listPendingReviewRecounts() {
   return db.getAllFromIndex('review_recounts', 'sync_status', 'pending');
 }
 
-export async function deleteLocalReviewBatchCascade(batchId) {
-  if (!batchId) return { batches: 0, items: 0, wms: 0, recounts: 0 };
+export async function saveReviewRecountLines(rows, options = {}) {
+  const now = new Date().toISOString();
+  return putMany('review_recount_lines', (rows || []).map((row) => ({
+    ...row,
+    sync_status: row.sync_status || 'pending',
+    created_at: row.created_at || now,
+    updated_at: row.updated_at || now
+  })), options);
+}
+
+export async function replaceRemoteReviewRecountLines(rows = []) {
   const db = await getDB();
-  const stores = ['review_batches', 'review_items', 'review_wms_stock', 'review_recounts'];
+  const tx = db.transaction('review_recount_lines', 'readwrite');
+  const store = tx.objectStore('review_recount_lines');
+  const existing = await store.getAll();
+  const pendingById = new Map(
+    existing.filter((row) => row.sync_status === 'pending').map((row) => [row.id, row])
+  );
+
+  await store.clear();
+  for (const row of rows || []) {
+    if (pendingById.has(row.id)) continue;
+    await store.put({
+      ...row,
+      sync_status: 'synced',
+      created_at: row.created_at || new Date().toISOString(),
+      updated_at: row.updated_at || new Date().toISOString()
+    });
+  }
+  for (const row of pendingById.values()) await store.put(row);
+  await tx.done;
+  return rows || [];
+}
+
+export async function replaceReviewRecountLines(itemId, rows = []) {
+  const db = await getDB();
+  const tx = db.transaction('review_recount_lines', 'readwrite');
+  const store = tx.objectStore('review_recount_lines');
+  const existing = await store.index('item_id').getAll(itemId);
+  await Promise.all(existing.map((row) => store.delete(row.id)));
+  const now = new Date().toISOString();
+  await Promise.all((rows || []).map((row) => store.put({
+    ...row,
+    sync_status: row.sync_status || 'pending',
+    created_at: row.created_at || now,
+    updated_at: row.updated_at || now
+  })));
+  await tx.done;
+  return rows || [];
+}
+
+export async function listReviewRecountLines(batchId) {
+  const db = await getDB();
+  const rows = await db.getAllFromIndex('review_recount_lines', 'batch_id', batchId);
+  return rows.sort((a, b) =>
+    `${a.material_code || ''}::${a.location || ''}::${a.id || ''}`.localeCompare(
+      `${b.material_code || ''}::${b.location || ''}::${b.id || ''}`
+    )
+  );
+}
+
+export async function listReviewRecountLinesByItem(itemId) {
+  const db = await getDB();
+  const rows = await db.getAllFromIndex('review_recount_lines', 'item_id', itemId);
+  return rows.sort((a, b) => String(a.location || '').localeCompare(String(b.location || '')));
+}
+
+export async function listPendingReviewRecountLines() {
+  const db = await getDB();
+  return db.getAllFromIndex('review_recount_lines', 'sync_status', 'pending');
+}
+
+export async function deleteLocalReviewBatchCascade(batchId) {
+  if (!batchId) return { batches: 0, items: 0, wms: 0, recounts: 0, recount_lines: 0 };
+  const db = await getDB();
+  const stores = ['review_batches', 'review_items', 'review_wms_stock', 'review_recounts', 'review_recount_lines'];
   const tx = db.transaction(stores, 'readwrite');
-  const [items, wms, recounts] = await Promise.all([
+  const [items, wms, recounts, recountLines] = await Promise.all([
     tx.objectStore('review_items').index('batch_id').getAll(batchId),
     tx.objectStore('review_wms_stock').index('batch_id').getAll(batchId),
-    tx.objectStore('review_recounts').index('batch_id').getAll(batchId)
+    tx.objectStore('review_recounts').index('batch_id').getAll(batchId),
+    tx.objectStore('review_recount_lines').index('batch_id').getAll(batchId)
   ]);
   await tx.objectStore('review_batches').delete(batchId);
   await Promise.all(items.map((row) => tx.objectStore('review_items').delete(row.id)));
   await Promise.all(wms.map((row) => tx.objectStore('review_wms_stock').delete(row.id)));
   await Promise.all(recounts.map((row) => tx.objectStore('review_recounts').delete(row.id)));
+  await Promise.all(recountLines.map((row) => tx.objectStore('review_recount_lines').delete(row.id)));
   await tx.done;
-  return { batches: 1, items: items.length, wms: wms.length, recounts: recounts.length };
+  return { batches: 1, items: items.length, wms: wms.length, recounts: recounts.length, recount_lines: recountLines.length };
 }

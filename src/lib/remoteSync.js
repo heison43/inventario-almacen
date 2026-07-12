@@ -181,7 +181,7 @@ export async function syncPendingChanges(user) {
     await markRecordsSynced('found_items', pendingFound.map((row) => row.id));
     await clearDeletedRecords(pendingDeletes.map((row) => row.id));
 
-    const reviewSync = await syncReviewPendingChanges();
+    const reviewSync = await syncReviewPendingChanges(user);
 
     return {
       ok: true,

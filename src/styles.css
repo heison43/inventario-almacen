@@ -782,3 +782,72 @@ tr.selected-row td:first-child { box-shadow: inset 4px 0 0 #0284c7; }
   .review-save-row { align-items: stretch; flex-direction: column; }
   .review-save-row button { width: 100%; }
 }
+
+/* v24 - Reconteo por múltiples ubicaciones */
+.review-recount-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+.review-recount-heading h3 { margin: 0 0 4px; }
+.review-recount-heading p { margin: 0; color: var(--muted); font-size: .84rem; }
+.compact-button { padding: 9px 12px; white-space: nowrap; }
+.recount-lines { display: grid; gap: 10px; }
+.recount-line {
+  display: grid;
+  grid-template-columns: auto minmax(190px, 1fr) minmax(150px, .65fr) minmax(220px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  padding: 11px;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: #f8fbff;
+}
+.recount-line label { font-size: .78rem; font-weight: 800; color: #334155; }
+.recount-line input { margin-top: 5px; width: 100%; }
+.recount-line-number {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-weight: 900;
+  align-self: center;
+}
+.danger-icon { color: #b91c1c; background: #fee2e2; align-self: end; }
+.recount-total-bar {
+  margin-top: 12px;
+  padding: 11px 13px;
+  border-radius: 14px;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 14px;
+}
+.recount-total-bar span { font-weight: 800; color: #334155; }
+.recount-total-bar strong { font-size: 1.2rem; color: #1e3a8a; }
+.recount-total-bar small { color: #475569; font-weight: 750; }
+.review-result-grid { margin-top: 12px; }
+
+@media (max-width: 980px) {
+  .recount-line { grid-template-columns: auto 1fr 1fr auto; }
+  .recount-line label:nth-of-type(3) { grid-column: 2 / span 2; }
+  .recount-total-bar { grid-template-columns: 1fr auto; }
+  .recount-total-bar small { grid-column: 1 / -1; }
+}
+
+@media (max-width: 640px) {
+  .review-recount-heading { flex-direction: column; }
+  .review-recount-heading button { width: 100%; }
+  .recount-line { grid-template-columns: auto 1fr auto; }
+  .recount-line label { grid-column: 2; }
+  .recount-line .danger-icon { grid-column: 3; grid-row: 1; }
+  .recount-total-bar { grid-template-columns: 1fr auto; }
+}
