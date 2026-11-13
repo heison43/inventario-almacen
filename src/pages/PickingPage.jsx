@@ -393,10 +393,10 @@ export default function PickingPage({ user, onGoToInventory }) {
       {!details.length && <tr><td colSpan="11" className="pk-empty">No hay ubicaciones WMS para los códigos y filtros seleccionados.</td></tr>}
       </tbody></table></div>
       <div className="pk-only-print"><table className="pk-table"><thead><tr>
-        <th>Código</th><th>Almacén</th><th>Ubicación</th><th>Lote</th><th>WMS</th><th>UM</th><th>A separar</th><th>Retirado</th><th>Área</th><th>Estado</th>
+        <th>Código</th><th>Almacén</th><th>Ubicación</th><th>Lote</th><th>WMS</th><th>UM</th><th>A separar</th><th>Retirado</th><th>Área</th><th>Solicitante</th><th>Estado</th>
       </tr></thead><tbody>{details.map((r) => <tr key={r.rowKey}>
         <td>{normalizeCode(r.code)}</td><td>{r.warehouse}</td><td>{r.location}</td><td>{r.lot}</td><td>{formatQty(r.quantity)}</td>
-        <td>{r.unit}</td><td>{toAmount(plan[r.rowKey]) || '—'}</td><td>________</td><td>{r.department}</td>
+        <td>{r.unit}</td><td>{toAmount(plan[r.rowKey]) || '—'}</td><td>________</td><td>{r.department}</td><td>{r.requester || '—'}</td>
         <td>{r.flagged ? 'REVISAR' : r.lock + ' / ' + r.workStatus}</td></tr>)}
       </tbody></table></div>
     </section>}
