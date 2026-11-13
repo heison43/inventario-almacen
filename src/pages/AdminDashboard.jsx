@@ -41,14 +41,23 @@ export default function AdminDashboard({ user, onOpenReconciliation }) {
   const [bulkAssignments, setBulkAssignments] = useState({});
   const [savingBulkId, setSavingBulkId] = useState('');
 
-  useEffect(() => { refresh(); }, []);
+  useEffect(() => {
+    // Mostrar campañas ya guardadas de inmediato; App actualiza Supabase al fondo.
+    refresh({ remote: false });
+    const onSyncCompleted = () => refresh({ remote: false });
+    window.addEventListener('inventario-sync-completed', onSyncCompleted);
+    return () => window.removeEventListener('inventario-sync-completed', onSyncCompleted);
+  }, []);
 
-  async function refresh() {
-    if (isSupabaseConfigured) {
+  async function refresh({ remote = true } = {}) {
+    if (remote && isSupabaseConfigured) {
       setSyncingRemote(true);
-      const pulled = await pullFromSupabase();
-      if (!pulled.ok) setMessage(`Aviso Supabase: ${pulled.message}`);
-      setSyncingRemote(false);
+      try {
+        const pulled = await pullFromSupabase(user);
+        if (!pulled.ok) setMessage(`Aviso Supabase: ${pulled.message}`);
+      } finally {
+        setSyncingRemote(false);
+      }
     }
     const [rows, userRows] = await Promise.all([listCampaigns(), listAppUsers('contador', { seedDefaults: !isSupabaseConfigured })]);
     const withLocations = await Promise.all(rows.map(async (campaign) => ({

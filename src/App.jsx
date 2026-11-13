@@ -23,32 +23,56 @@ export default function App() {
   const [booting, setBooting] = useState(true);
   const [syncMessage, setSyncMessage] = useState('');
 
+  // La validación de la sesión es lo único que bloquea la pantalla inicial.
+  // La descarga de campañas puede tardar mucho; se ejecuta después de abrir.
+  function refreshInBackground(profile, isCurrent = () => true) {
+    if (!isSupabaseConfigured || !profile) return;
+
+    // No esperamos aquí: la interfaz ya puede utilizar la copia en IndexedDB.
+    Promise.resolve()
+      .then(() => pullFromSupabase(profile))
+      .then((result) => {
+        if (!isCurrent()) return;
+        if (!result.ok) setSyncMessage(`Aviso de sincronización: ${result.message}`);
+        window.dispatchEvent(new CustomEvent('inventario-sync-completed', { detail: { ok: result.ok } }));
+      })
+      .catch((error) => {
+        if (isCurrent()) setSyncMessage(`No se pudo actualizar Supabase: ${error.message}`);
+      });
+  }
+
   useEffect(() => {
+    let active = true;
+
     async function init() {
       try {
         if (isSupabaseConfigured) {
           const profile = await getCurrentProfile();
+          if (!active) return;
           if (profile) {
             setUser(profile);
             setView(profile.role === 'admin' ? 'admin' : 'counter');
-            await pullFromSupabase(profile);
+            setBooting(false); // Abrir antes de descargar el inventario remoto.
+            refreshInBackground(profile, () => active);
+            return;
           }
         } else {
           const stored = localStorage.getItem(USER_KEY);
-          if (stored) {
+          if (stored && active) {
             const parsed = JSON.parse(stored);
             setUser(parsed);
             setView(parsed.role === 'admin' ? 'admin' : 'counter');
           }
         }
       } catch (error) {
-        setSyncMessage(error.message);
+        if (active) setSyncMessage(error.message);
       } finally {
-        setBooting(false);
+        if (active) setBooting(false);
       }
     }
 
     init();
+    return () => { active = false; };
   }, []);
 
   function handleLogin(data) {
@@ -57,6 +81,8 @@ export default function App() {
     }
     setUser(data);
     setView(data.role === 'admin' ? 'admin' : 'counter');
+    // También actualizar tras iniciar sesión manualmente, sin bloquear la vista.
+    if (isSupabaseConfigured) refreshInBackground(data);
   }
 
   async function handleLogout() {
