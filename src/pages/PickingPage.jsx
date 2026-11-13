@@ -298,7 +298,7 @@ export default function PickingPage({ user, onGoToInventory }) {
         <p>Prepara varias referencias en una sola búsqueda de ubicaciones y lotes.</p>
       </div></header>
       <div className="pk-notice"><AlertTriangle size={18}/>
-        <span>Documento de apoyo, no equivale a una reserva, salida de almacén ni vale. WMS muestra ubicaciones según su fecha de corte; SAP, cantidades de otra fecha. Confirma existencias y estados físicamente antes de entregar.</span></div>
+        <span>Soporte de separación y entrega física. Este documento no registra salidas ni descuenta existencias en SAP/WMS. Verifica cantidades, lotes y estados antes de entregar; utiliza el PDF firmado conforme al procedimiento autorizado por la empresa.</span></div>
       {loading ? <p>Cargando bases locales...</p> : <div className="pk-files">
         <span className={reports.wms ? 'pk-loaded' : 'pk-unloaded'}><FileSpreadsheet size={16}/> WMS: {reports.wms ? formatQty(reports.wms.records.length) + ' líneas · ' + reports.wms.snapshot : 'No cargado'}</span>
         <span className={reports.sap ? 'pk-loaded' : 'pk-unloaded'}><FileSpreadsheet size={16}/> SAP: {reports.sap ? formatQty(reports.sap.records.length) + ' líneas · ' + reports.sap.snapshot : 'No cargado'}</span>
