@@ -40,7 +40,7 @@ const aliases = {
   order: ['no. de doc. cliente (sap)', 'numero de orden', 'orden de compra', 'no. de pedido de compra de referencia'],
   area: ['nombre del area de almacen', 'area de almacen'],
   ageDays: ['tiempo de antiguedad del almacen', 'antiguedad dias'],
-  recordId: ['id', 'id de inventario', 'id inventario']
+  recordId: ['id', 'id de inventario', 'id inventario', 'no.', 'no']
 };
 const accentless = (value) => normalizeSearch(value).replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 const aliasKey = Object.fromEntries(
@@ -79,18 +79,29 @@ function extractDate(filename) {
   if (check.getUTCFullYear() !== y || check.getUTCMonth() !== m - 1 || check.getUTCDate() !== d) return 'No indicada';
   return String(d).padStart(2, '0') + '/' + String(m).padStart(2, '0') + '/' + y;
 }
+// WMS puede superar las 120 columnas: leer solo las columnas útiles
+// evita generar otra matriz gigante con sheet_to_json(..., header: 1).
+function cellValue(sheet, row, col) {
+  const denseRows = sheet['!data'];
+  const cell = denseRows
+    ? denseRows[row]?.[col]
+    : (Array.isArray(sheet) ? sheet[row]?.[col] : sheet[XLSX.utils.encode_cell({ r: row, c: col })]);
+  return cell?.v ?? '';
+}
 function selectSheet(workbook, source) {
   let selected = null;
   const required = source === 'sap' ? ['code', 'quantity', 'lot'] : ['code', 'quantity', 'lot', 'location'];
   for (const sheetName of workbook.SheetNames) {
-    const raw = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
-      header: 1, raw: true, blankrows: false, defval: ''
-    });
-    for (let headerAt = 0; headerAt < Math.min(20, raw.length); headerAt++) {
-      const mapping = matchColumns(raw[headerAt]);
+    const sheet = workbook.Sheets[sheetName];
+    if (!sheet?.['!ref']) continue;
+    const range = XLSX.utils.decode_range(sheet['!ref']);
+    for (let headerAt = range.s.r; headerAt <= Math.min(range.e.r, range.s.r + 19); headerAt++) {
+      const header = [];
+      for (let col = range.s.c; col <= range.e.c; col++) header[col] = cellValue(sheet, headerAt, col);
+      const mapping = matchColumns(header);
       if (!required.every((key) => mapping[key] !== undefined)) continue;
       const score = Object.keys(mapping).length;
-      if (!selected || score > selected.score) selected = { raw, sheetName, headerAt, mapping, score };
+      if (!selected || score > selected.score) selected = { sheet, sheetName, headerAt, mapping, score, range };
     }
   }
   if (!selected) throw new Error(
@@ -133,13 +144,17 @@ function rowToRecord(row, mapping, source, index, fallbackWarehouse) {
 export async function parseReport(file, source) {
   if (!file || !/\.(xlsx|xls|csv)$/i.test(file.name)) throw new Error('Selecciona un archivo XLSX, XLS o CSV.');
   if (source !== 'wms' && source !== 'sap') throw new Error('Fuente de inventario desconocida.');
-  const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: false });
-  const { raw, sheetName, headerAt, mapping } = selectSheet(wb, source);
+  // Dense reduce memoria durante la importación de reportes XLSX anchos.
+  const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: false, dense: true });
+  const { sheet, sheetName, headerAt, mapping, range } = selectSheet(wb, source);
   const records = [];
-  for (let i = headerAt + 1; i < raw.length; i++) {
+  const neededColumns = Array.from(new Set(Object.values(mapping)));
+  for (let i = headerAt + 1; i <= range.e.r; i++) {
+    const row = [];
+    for (const column of neededColumns) row[column] = cellValue(sheet, i, column);
     // El archivo SAP "Edades" tiene el almacén en AF y su cabecera está vacía.
-    const fallbackWarehouse = source === 'sap' && mapping.warehouse === undefined ? raw[i][31] : '';
-    const record = rowToRecord(raw[i], mapping, source, i + 1, fallbackWarehouse);
+    const fallbackWarehouse = source === 'sap' && mapping.warehouse === undefined ? cellValue(sheet, i, 31) : '';
+    const record = rowToRecord(row, mapping, source, i + 1, fallbackWarehouse);
     if (record) records.push(record);
   }
   if (!records.length) throw new Error('No se encontraron líneas de inventario con código.');

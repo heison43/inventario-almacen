@@ -66,7 +66,7 @@ export function isUncertainLine(record) {
   const work = normalizeSearch(record.workStatus);
   const blocked = /\bbloquea|bloquead|bloqueo|inmoviliz/.test(lock) &&
     !/no bloquead|sin bloqueo|desbloquead/.test(lock);
-  const outbound = /por salir|reservad|despach|entregad|por entrega/.test(work);
+  const outbound = /por salir|reservad|despach|entregad|por entrega|en transito|por entrar/.test(work);
   return blocked || outbound || Number(record.quantity) <= 0 || !record.location;
 }
 
