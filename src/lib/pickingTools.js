@@ -112,3 +112,56 @@ export function createPickingResult(requests, wmsIndex, sapIndex) {
   }
   return { summary, details, sapDetail };
 }
+
+
+// El filtro se aplica a las líneas WMS por código; SAP mantiene su referencia
+// original porque las áreas y solicitantes de las fuentes no son equivalentes.
+export const PICKING_NO_DATA = '__PICKING_SIN_DATO__';
+
+export function pickingFieldOptions(rows, field) {
+  const found = new Map();
+  for (const row of rows || []) {
+    const raw = String(row[field] || '').trim();
+    const normalized = normalizeSearch(raw);
+    if (!found.has(normalized)) found.set(normalized, {
+      value: raw || PICKING_NO_DATA,
+      label: raw || 'Sin dato'
+    });
+  }
+  return Array.from(found.values()).sort((a, b) =>
+    a.label.localeCompare(b.label, 'es', { sensitivity: 'base', numeric: true })
+  );
+}
+
+function matchesPickingField(row, field, selected) {
+  if (!selected) return true;
+  if (selected === PICKING_NO_DATA) return !String(row[field] || '').trim();
+  return normalizeSearch(row[field]) === normalizeSearch(selected);
+}
+
+export function filterPickingResult(source, selections = {}) {
+  if (!source) return null;
+  const details = source.details.filter((row) => {
+    const selected = selections[row.requestKey] || {};
+    return matchesPickingField(row, 'department', selected.department) &&
+      matchesPickingField(row, 'requester', selected.requester);
+  });
+  const byCode = new Map();
+  for (const row of details) {
+    if (!byCode.has(row.requestKey)) byCode.set(row.requestKey, []);
+    byCode.get(row.requestKey).push(row);
+  }
+  const summary = source.summary.map((item) => {
+    const rows = byCode.get(item.key) || [];
+    return {
+      ...item,
+      originalWmsLines: item.wmsLines,
+      filteredOut: item.wmsLines > 0 && rows.length === 0,
+      wmsQuantity: sumInSingleUnit(rows),
+      wmsLines: rows.length,
+      locationCount: new Set(rows.map((row) => row.location).filter(Boolean)).size,
+      flaggedCount: rows.filter((row) => row.flagged).length
+    };
+  });
+  return { summary, details, sapDetail: source.sapDetail };
+}
