@@ -110,6 +110,14 @@ export default function PickingPage({ user, onGoToInventory }) {
     filterPickingResult(fullResults, lineSelections),
     [fullResults, lineSelections]);
   const details = useMemo(() => (results?.details || []).slice().sort((a, b) => sortRows(a, b, sortBy)), [results, sortBy]);
+  // Solo se imprimen líneas efectivamente seleccionadas para separación.
+  // La consulta en pantalla y la exportación Excel conservan el detalle completo.
+  const printDetails = useMemo(() =>
+    details.filter((row) => toAmount(plan[row.rowKey]) > 0),
+    [details, plan]);
+  const printCodeCount = useMemo(() =>
+    new Set(printDetails.map((row) => row.requestKey)).size,
+    [printDetails]);
 
   function changeSelection(codeKey, field, value) {
     setLineSelections((current) => ({
@@ -269,7 +277,7 @@ export default function PickingPage({ user, onGoToInventory }) {
   }
 
   function printPicking() {
-    if (!generated || planError) return;
+    if (!generated || planError || printDetails.length === 0) return;
     window.print();
   }
   const missingCount = results?.summary.filter((r) => !r.originalWmsLines).length || 0;
@@ -320,7 +328,7 @@ export default function PickingPage({ user, onGoToInventory }) {
     {generated && results && <section className="panel-card pk-card pk-print-area">
       <header className="pk-results-top"><div><h2>Hoja de picking · Consulta de ubicaciones</h2>
         <p>Generado: {new Date(generated.createdAt).toLocaleString('es-CO')} · WMS: {generated.wmsSnapshot} · SAP: {generated.sapSnapshot}</p></div>
-        <div className="pk-export pk-no-print"><button type="button" className="pk-secondary" disabled={Boolean(planError)} onClick={printPicking}><Printer size={16}/> Imprimir / PDF</button>
+        <div className="pk-export pk-no-print"><button type="button" className="pk-secondary" disabled={Boolean(planError) || printDetails.length === 0} title={printDetails.length ? "Imprimir solo las líneas con cantidad a separar" : "Asigna una cantidad a separar antes de imprimir"} onClick={printPicking}><Printer size={16}/> Imprimir / PDF</button>
           <button type="button" className="pk-primary" disabled={Boolean(planError)} onClick={exportExcel}><Download size={17}/> Descargar Excel</button></div>
       </header>
       {codeOptions.length > 0 && <div className="pk-area-filters pk-no-print">
@@ -356,17 +364,17 @@ export default function PickingPage({ user, onGoToInventory }) {
         <MetaLine title="Almacén consultado" text={generated.meta.warehouse || 'Todos'}/>
       </div>
       <div className="pk-stats">
-        <div><span>Códigos</span><strong>{results.summary.length}</strong></div>
-        <div><span>Líneas WMS</span><strong>{formatQty(results.details.length)}</strong></div>
-        <div><span>Sin ubicación WMS</span><strong>{missingCount}</strong></div>
-        <div><span>Líneas a verificar</span><strong>{flaggedCount}</strong></div>
+        <div><span>Códigos</span><strong className="pk-no-print">{results.summary.length}</strong><strong className="pk-only-print">{printCodeCount}</strong></div>
+        <div><span>Líneas WMS</span><strong className="pk-no-print">{formatQty(results.details.length)}</strong><strong className="pk-only-print">{formatQty(printDetails.length)}</strong></div>
+        <div className="pk-no-print"><span>Sin ubicación WMS</span><strong>{missingCount}</strong></div>
+        <div className="pk-no-print"><span>Líneas a verificar</span><strong>{flaggedCount}</strong></div>
       </div>
       <h3>Resumen del pedido</h3>
       <div className="pk-scroll"><table className="pk-table pk-summary"><thead><tr>
         <th>Código</th><th>Descripción</th><th>Solicitado</th><th>WMS referencial</th><th>SAP referencial</th><th>A separar</th><th>Sin asignar</th><th>Estado</th>
       </tr></thead><tbody>{results.summary.map((item) => {
         const proposed = plannedPerCode.get(item.key) || 0;
-        return <tr key={item.key}><td className="pk-nowrap"><b>{normalizeCode(item.code)}</b></td><td>{item.description || 'Sin descripción'}</td>
+        return <tr key={item.key} className={proposed > 0 ? '' : 'pk-print-skip'}><td className="pk-nowrap"><b>{normalizeCode(item.code)}</b></td><td>{item.description || 'Sin descripción'}</td>
           <td className="pk-num">{formatQty(item.qty)}</td>
           <td className="pk-num">{displayAmount(item.wmsQuantity.amount)} <small>{item.wmsQuantity.unit}</small></td>
           <td className="pk-num">{displayAmount(item.sapQuantity.amount)} <small>{item.sapQuantity.unit}</small></td>
@@ -374,7 +382,8 @@ export default function PickingPage({ user, onGoToInventory }) {
           <td className="pk-num">{formatQty(item.qty - proposed)}</td><td><StatusLabel item={item}/></td></tr>;
       })}</tbody></table></div>
       {planError && <p className="pk-error pk-no-print" role="alert">{planError}</p>}
-      {missingCount > 0 && <p className="pk-notice">Hay {missingCount} código(s) sin ubicación WMS. Se incluyen en el resumen y la hoja SIN_UBICACION del Excel; verifica su existencia antes del despacho.</p>}
+      {!planError && printDetails.length === 0 && <p className="pk-muted pk-no-print">Para imprimir, ingresa primero la cantidad «A recoger» de al menos una línea. Las líneas sin cantidad no aparecerán en el papel.</p>}
+      {missingCount > 0 && <p className="pk-notice pk-no-print">Hay {missingCount} código(s) sin ubicación WMS. Se incluyen en el resumen y la hoja SIN_UBICACION del Excel; verifica su existencia antes del despacho.</p>}
       <div className="pk-inline-title"><h3>Detalle físico por lote y ubicación</h3>
         <label className="pk-no-print">Ordenar por <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
           <option value="location">Almacén y ubicación</option><option value="code">Código</option></select></label></div>
@@ -394,7 +403,7 @@ export default function PickingPage({ user, onGoToInventory }) {
       </tbody></table></div>
       <div className="pk-only-print"><table className="pk-table"><thead><tr>
         <th>Código</th><th>Almacén</th><th>Ubicación</th><th>Lote</th><th>WMS</th><th>UM</th><th>A separar</th><th>Retirado</th><th>Área</th><th>Solicitante</th><th>Estado</th>
-      </tr></thead><tbody>{details.map((r) => <tr key={r.rowKey}>
+      </tr></thead><tbody>{printDetails.map((r) => <tr key={r.rowKey}>
         <td>{normalizeCode(r.code)}</td><td>{r.warehouse}</td><td>{r.location}</td><td>{r.lot}</td><td>{formatQty(r.quantity)}</td>
         <td>{r.unit}</td><td>{toAmount(plan[r.rowKey]) || '—'}</td><td>________</td><td>{r.department}</td><td>{r.requester || '—'}</td>
         <td>{r.flagged ? 'REVISAR' : r.lock + ' / ' + r.workStatus}</td></tr>)}
