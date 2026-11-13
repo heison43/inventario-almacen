@@ -56,6 +56,8 @@ export default function PickingPage({ user, onGoToInventory }) {
   const [requester, setRequester] = useState('');
   const [department, setDepartment] = useState('');
   const [document, setDocument] = useState('');
+  const [reservation, setReservation] = useState('');
+  const [costCenter, setCostCenter] = useState('');
   const [warehouseFilter, setWarehouseFilter] = useState('');
   const [generated, setGenerated] = useState(null);
   const [plan, setPlan] = useState({});
@@ -196,7 +198,11 @@ export default function PickingPage({ user, onGoToInventory }) {
       const requests = combineRequests(rawRows);
       setGenerated({
         requests, createdAt: new Date().toISOString(),
-        meta: { requester: requester.trim(), department: department.trim(), document: document.trim(), warehouse: warehouseFilter },
+        meta: {
+          requester: requester.trim(), department: department.trim(),
+          document: document.trim(), reservation: reservation.trim(),
+          costCenter: costCenter.trim(), warehouse: warehouseFilter
+        },
         wmsSnapshot: reports.wms?.snapshot || 'Sin WMS',
         sapSnapshot: reports.sap?.snapshot || 'Sin SAP'
       });
@@ -255,13 +261,15 @@ export default function PickingPage({ user, onGoToInventory }) {
       ['HOJA DE PICKING - CONSULTA DE UBICACIONES'],
       ['Fecha de preparación', now], ['Solicitado por', generated.meta.requester],
       ['Área solicitante', generated.meta.department],
-      ['No. solicitud / vale', generated.meta.document],
+      ['Número de ticket', generated.meta.document],
+      ['Número de Reserva / OT', generated.meta.reservation],
+      ['Centro de costo', generated.meta.costCenter],
       ['Filtro de almacén WMS', generated.meta.warehouse || 'Todos'],
       ['Fecha de base WMS', generated.wmsSnapshot],
       ['Fecha de base SAP', generated.sapSnapshot],
       ['IMPORTANTE', 'Verificar físicamente antes de retirar. Las bases pueden estar desactualizadas.']
     ]);
-    XLSX.utils.sheet_add_json(wsPedido, pedido, { origin: 'A11' });
+    XLSX.utils.sheet_add_json(wsPedido, pedido, { origin: 'A13' });
     wsPedido['!cols'] = [14, 45, 20, 15, 20, 17, 20, 19, 20, 15, 24, 21, 22, 24];
     XLSX.utils.book_append_sheet(workbook, wsPedido, 'PEDIDO');
     XLSX.utils.book_append_sheet(workbook,
@@ -290,7 +298,7 @@ export default function PickingPage({ user, onGoToInventory }) {
         <p>Prepara varias referencias en una sola búsqueda de ubicaciones y lotes.</p>
       </div></header>
       <div className="pk-notice"><AlertTriangle size={18}/>
-        <span>Documento de apoyo, no equivale a una reserva, salida de almacén ni vale. WMS muestra ubicaciones según su fecha de corte; SAP, cantidades de otra fecha. Confirma existencias y estados físicamente antes de entregar.</span></div>
+        <span>Soporte de separación y entrega física. Este documento no registra salidas ni descuenta existencias en SAP/WMS. Verifica cantidades, lotes y estados antes de entregar; utiliza el PDF firmado conforme al procedimiento autorizado por la empresa.</span></div>
       {loading ? <p>Cargando bases locales...</p> : <div className="pk-files">
         <span className={reports.wms ? 'pk-loaded' : 'pk-unloaded'}><FileSpreadsheet size={16}/> WMS: {reports.wms ? formatQty(reports.wms.records.length) + ' líneas · ' + reports.wms.snapshot : 'No cargado'}</span>
         <span className={reports.sap ? 'pk-loaded' : 'pk-unloaded'}><FileSpreadsheet size={16}/> SAP: {reports.sap ? formatQty(reports.sap.records.length) + ' líneas · ' + reports.sap.snapshot : 'No cargado'}</span>
@@ -299,7 +307,9 @@ export default function PickingPage({ user, onGoToInventory }) {
       <div className="pk-metadata">
         <label>Solicitado por<input value={requester} onChange={(e) => setRequester(e.target.value)} placeholder="Opcional" /></label>
         <label>Área solicitante<input value={department} onChange={(e) => setDepartment(e.target.value)} placeholder="Opcional" /></label>
-        <label>No. solicitud / vale<input value={document} onChange={(e) => setDocument(e.target.value)} placeholder="Opcional" /></label>
+        <label>Número de ticket<input value={document} onChange={(e) => setDocument(e.target.value)} placeholder="Opcional" /></label>
+        <label>Número de Reserva / OT<input value={reservation} onChange={(e) => setReservation(e.target.value)} placeholder="Opcional" /></label>
+        <label>Centro de costo<input value={costCenter} onChange={(e) => setCostCenter(e.target.value)} placeholder="Opcional" /></label>
         <label>Almacén (WMS)<select value={warehouseFilter} onChange={(e) => { setWarehouseFilter(e.target.value); setGenerated(null); setPlan({}); setLineSelections({}); }}>
           <option value="">Todos los almacenes</option>{warehouses.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
       </div>
@@ -360,7 +370,9 @@ export default function PickingPage({ user, onGoToInventory }) {
       <div className="pk-print-meta">
         <MetaLine title="Solicitado por" text={generated.meta.requester}/>
         <MetaLine title="Área" text={generated.meta.department}/>
-        <MetaLine title="Solicitud / vale" text={generated.meta.document}/>
+        <MetaLine title="Número de ticket" text={generated.meta.document}/>
+        <MetaLine title="Reserva / OT" text={generated.meta.reservation}/>
+        <MetaLine title="Centro de costo" text={generated.meta.costCenter}/>
         <MetaLine title="Almacén consultado" text={generated.meta.warehouse || 'Todos'}/>
       </div>
       <div className="pk-stats">
@@ -408,6 +420,11 @@ export default function PickingPage({ user, onGoToInventory }) {
         <td>{r.unit}</td><td>{toAmount(plan[r.rowKey]) || '—'}</td><td>________</td><td>{r.department}</td><td>{r.requester || '—'}</td>
         <td>{r.flagged ? 'REVISAR' : r.lock + ' / ' + r.workStatus}</td></tr>)}
       </tbody></table></div>
+      <div className="pk-signatures">
+        <div className="pk-signature"><div className="pk-signature-line"/><strong>Separado por</strong></div>
+        <div className="pk-signature"><div className="pk-signature-line"/><strong>Entregado por</strong></div>
+        <div className="pk-signature"><div className="pk-signature-line"/><strong>Recibido por</strong></div>
+      </div>
     </section>}
   </div>;
 }
