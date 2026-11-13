@@ -1,4 +1,4 @@
-import { BarChart3, ClipboardCheck, ClipboardList, LogOut, Menu, RefreshCw, Search, ShieldCheck, UploadCloud, Users } from 'lucide-react';
+import { BarChart3, Database, ClipboardCheck, ClipboardList, LogOut, Menu, RefreshCw, Search, ShieldCheck, UploadCloud, Users } from 'lucide-react';
 import { useState } from 'react';
 
 export default function Layout({ user, view, setView, onLogout, onSync, syncMessage, onlineMode, children }) {
@@ -10,6 +10,7 @@ export default function Layout({ user, view, setView, onLogout, onSync, syncMess
         { id: 'admin', label: 'Campañas', icon: UploadCloud },
         { id: 'reconciliation', label: 'Conciliación', icon: BarChart3 },
         { id: 'quick-lookup', label: 'Consulta rápida', icon: Search },
+        { id: 'reference-inventory', label: 'Consulta SAP / WMS', icon: Database },
         { id: 'difference-review', label: 'Revisión diferencias', icon: ClipboardCheck },
         { id: 'counter', label: 'Conteo', icon: ClipboardList },
         { id: 'users', label: 'Usuarios', icon: Users }
@@ -17,6 +18,7 @@ export default function Layout({ user, view, setView, onLogout, onSync, syncMess
     : [
         { id: 'counter', label: 'Conteo', icon: ClipboardList },
         { id: 'quick-lookup', label: 'Consulta rápida', icon: Search },
+        { id: 'reference-inventory', label: 'Consulta SAP / WMS', icon: Database },
         { id: 'difference-review', label: 'Revisión diferencias', icon: ClipboardCheck }
       ];
 
@@ -81,7 +83,7 @@ export default function Layout({ user, view, setView, onLogout, onSync, syncMess
           </button>
           <div>
             <h1>{titleByView(view)}</h1>
-            <p>Conteo por zona, ubicación, código y lote.</p>
+            {view === 'reference-inventory' ? <p>Consulta temporal por código, lote, almacén y ubicación.</p> : <p>Conteo por zona, ubicación, código y lote.</p>}
           </div>
           <div className="topbar-actions">
             <button className="secondary-button" onClick={handleSync} disabled={syncing || !onlineMode} title={onlineMode ? 'Sincronizar con Supabase' : 'Configura Supabase para sincronizar'}>
@@ -105,6 +107,7 @@ function titleByView(view) {
     counter: 'Conteo físico',
     reconciliation: 'Conciliación',
     'quick-lookup': 'Consulta rápida',
+    'reference-inventory': 'Consulta SAP / WMS',
     'difference-review': 'Revisión de diferencias',
     users: 'Usuarios'
   };

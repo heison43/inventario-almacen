@@ -6,6 +6,7 @@ import CounterDashboard from './pages/CounterDashboard.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import ReconciliationPage from './pages/ReconciliationPage.jsx';
 import QuickLookupPage from './pages/QuickLookupPage.jsx';
+import ReferenceInventoryPage from './pages/ReferenceInventoryPage.jsx';
 import DifferenceReviewPage from './pages/DifferenceReviewPage.jsx';
 import UsersPage from './pages/UsersPage.jsx';
 import { getCurrentProfile, signOut } from './lib/authService.js';
@@ -108,6 +109,7 @@ export default function App() {
       )}
       {view === 'reconciliation' && <ReconciliationPage selectedCampaignId={selectedCampaignId} />}
       {view === 'quick-lookup' && <QuickLookupPage user={user} />}
+      {view === 'reference-inventory' && <ReferenceInventoryPage user={user} />}
       {view === 'difference-review' && <DifferenceReviewPage user={user} />}
       {view === 'users' && <UsersPage />}
     </Layout>
