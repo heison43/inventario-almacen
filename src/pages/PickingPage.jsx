@@ -36,7 +36,7 @@ function sortRows(a, b, sort) {
 }
 function StatusLabel({ item }) {
   if (item.wmsLines === 0) return <span className="pk-status pk-missing">Sin ubicación WMS</span>;
-  if (item.flaggedCount > 0) return <span className="pk-status pk-warning">Revisar bloqueos ({item.flaggedCount})</span>;
+  if (item.flaggedCount > 0) return <span className="pk-status pk-warning">Revisar estados ({item.flaggedCount})</span>;
   return <span className="pk-status pk-ok">Ubicaciones encontradas</span>;
 }
 function MetaLine({ title, text }) {
