@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import Layout from './components/Layout.jsx';
 import AdminDashboard from './pages/AdminDashboard.jsx';
 import CountPage from './pages/CountPage.jsx';
@@ -14,6 +14,7 @@ import { isSupabaseConfigured } from './lib/supabaseClient.js';
 import { pullFromSupabase, syncPendingChanges } from './lib/remoteSync.js';
 
 const USER_KEY = 'inventario-almacen-user';
+const PickingPage = lazy(() => import('./pages/PickingPage.jsx'));
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -136,6 +137,7 @@ export default function App() {
       {view === 'reconciliation' && <ReconciliationPage selectedCampaignId={selectedCampaignId} />}
       {view === 'quick-lookup' && <QuickLookupPage user={user} />}
       {view === 'reference-inventory' && <ReferenceInventoryPage user={user} />}
+      {view === 'picking' && <Suspense fallback={<div className="panel-card">Cargando módulo de picking...</div>}><PickingPage user={user} onGoToInventory={() => setView('reference-inventory')} /></Suspense>}
       {view === 'difference-review' && <DifferenceReviewPage user={user} />}
       {view === 'users' && <UsersPage />}
     </Layout>
