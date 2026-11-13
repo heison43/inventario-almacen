@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ClipboardList, Download, FileSpreadsheet, Plus, Printer, Search, Trash2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { formatQty, normalizeCode, readReport } from '../lib/referenceInventory.js';
+import { formatQty, normalizeCode, normalizeSearch, readReport } from '../lib/referenceInventory.js';
 import {
-  combineRequests, createPickingResult, indexInventoryRecords, parsePickingPaste
+  combineRequests, createPickingResult, filterPickingResult, indexInventoryRecords,
+  parsePickingPaste, pickingFieldOptions, PICKING_NO_DATA
 } from '../lib/pickingTools.js';
 import '../picking.css';
 
@@ -35,6 +36,7 @@ function sortRows(a, b, sort) {
   return String(a.rowKey).localeCompare(String(b.rowKey), 'es', { numeric: true });
 }
 function StatusLabel({ item }) {
+  if (item.filteredOut) return <span className="pk-status pk-warning">Sin coincidencias con el filtro</span>;
   if (item.wmsLines === 0) return <span className="pk-status pk-missing">Sin ubicación WMS</span>;
   if (item.flaggedCount > 0) return <span className="pk-status pk-warning">Revisar estados ({item.flaggedCount})</span>;
   return <span className="pk-status pk-ok">Ubicaciones encontradas</span>;
@@ -57,6 +59,7 @@ export default function PickingPage({ user, onGoToInventory }) {
   const [warehouseFilter, setWarehouseFilter] = useState('');
   const [generated, setGenerated] = useState(null);
   const [plan, setPlan] = useState({});
+  const [lineSelections, setLineSelections] = useState({});
   const [sortBy, setSortBy] = useState('location');
 
   useEffect(() => {
@@ -81,11 +84,42 @@ export default function PickingPage({ user, onGoToInventory }) {
     [reports.wms, warehouseFilter]);
 
   const sapIndex = useMemo(() => indexInventoryRecords(reports.sap?.records), [reports.sap]);
-  const results = useMemo(() =>
+  const fullResults = useMemo(() =>
     generated ? createPickingResult(generated.requests, wmsIndex, sapIndex) : null,
     [generated, wmsIndex, sapIndex]);
 
+  // Filtros por material: no se mezclan líneas de otros códigos ni SAP.
+  const codeOptions = useMemo(() => {
+    if (!fullResults) return [];
+    const grouped = new Map();
+    for (const row of fullResults.details) {
+      if (!grouped.has(row.requestKey)) grouped.set(row.requestKey, []);
+      grouped.get(row.requestKey).push(row);
+    }
+    return fullResults.summary.map((item) => {
+      const rows = grouped.get(item.key) || [];
+      return {
+        key: item.key, code: item.code, rows,
+        departments: pickingFieldOptions(rows, 'department'),
+        requesters: pickingFieldOptions(rows, 'requester')
+      };
+    }).filter((item) => item.departments.length > 1 || item.requesters.length > 1);
+  }, [fullResults]);
+
+  const results = useMemo(() =>
+    filterPickingResult(fullResults, lineSelections),
+    [fullResults, lineSelections]);
   const details = useMemo(() => (results?.details || []).slice().sort((a, b) => sortRows(a, b, sortBy)), [results, sortBy]);
+
+  function changeSelection(codeKey, field, value) {
+    setLineSelections((current) => ({
+      ...current, [codeKey]: {
+        ...current[codeKey], [field]: value,
+        ...(field === 'department' ? { requester: '' } : {})
+      }
+    }));
+    setPlan({});
+  }
   const plannedPerCode = useMemo(() => {
     const planned = new Map();
     for (const item of results?.details || []) {
@@ -122,6 +156,7 @@ export default function PickingPage({ user, onGoToInventory }) {
       setGenerated(null);
       setPlan({});
     }
+    if (parsed.length) setLineSelections({});
     setError(problems.join(' '));
     setMessage(parsed.length ? 'Se agregaron ' + parsed.length + ' líneas a la solicitud.' : 'No se agregaron líneas.');
   }
@@ -129,6 +164,7 @@ export default function PickingPage({ user, onGoToInventory }) {
     setEntries((current) => current.map((r) => r.id === id ? { ...r, [field]: value } : r));
     setGenerated(null);
     setPlan({});
+    setLineSelections({});
   }
   function removeEntry(id) {
     setEntries((current) => {
@@ -137,6 +173,7 @@ export default function PickingPage({ user, onGoToInventory }) {
     });
     setGenerated(null);
     setPlan({});
+    setLineSelections({});
   }
   function generate() {
     setError('');
@@ -156,6 +193,7 @@ export default function PickingPage({ user, onGoToInventory }) {
         sapSnapshot: reports.sap?.snapshot || 'Sin SAP'
       });
       setPlan({});
+      setLineSelections({});
       setMessage('Consulta lista: ' + requests.length + ' códigos. Revisa las ubicaciones y genera el Excel.');
     } catch (err) { setError(err.message); }
   }
@@ -172,9 +210,9 @@ export default function PickingPage({ user, onGoToInventory }) {
       'Referencia SAP': withNumber(item.sapQuantity.amount),
       'UM SAP': item.sapQuantity.unit,
       'SAP sin restricciones': withNumber(item.sapFree.amount),
-      'Propuesta a retirar': plannedPerCode.get(item.key) || 0,
+      'Cantidad a separar': plannedPerCode.get(item.key) || 0,
       'Pendiente de asignar': item.qty - (plannedPerCode.get(item.key) || 0),
-      'Estado': item.wmsLines ? (item.flaggedCount ? 'REVISAR BLOQUEOS' : 'CONSULTA WMS') : 'SIN UBICACIÓN WMS'
+      'Estado': item.filteredOut ? 'SIN COINCIDENCIA PARA FILTRO' : item.wmsLines ? (item.flaggedCount ? 'REVISAR ESTADOS' : 'CONSULTA WMS') : 'SIN UBICACIÓN WMS'
     }));
     const ubicaciones = details.map((r) => ({
       'Código': r.code, 'Descripción': r.description,
@@ -182,7 +220,7 @@ export default function PickingPage({ user, onGoToInventory }) {
       'Nombre ubicación': r.locationName, 'Lote': String(r.lot),
       'Cantidad WMS (referencia)': r.quantity, 'UM': r.unit,
       'Solicitado total del código': r.requested,
-      'Propuesta a recoger': toAmount(plan[r.rowKey]) || '',
+      'Cantidad a separar': toAmount(plan[r.rowKey]) || '',
       'Cantidad retirada física': '',
       'Solicitante WMS': r.requester,
       'Área / departamento WMS': r.department,
@@ -199,14 +237,14 @@ export default function PickingPage({ user, onGoToInventory }) {
       'En inspección': r.inspection, 'Congelado': r.frozen, 'UM': r.unit,
       'Solicitante': r.requester, 'Área / departamento': r.department
     }));
-    const missing = results.summary.filter((s) => !s.wmsLines).map((s) => ({
+    const missing = results.summary.filter((s) => !s.originalWmsLines).map((s) => ({
       'Código': s.code, 'Descripción': s.description, 'Cantidad solicitada': s.qty,
       'Estado': 'SIN UBICACIÓN WMS', 'SAP de referencia': withNumber(s.sapQuantity.amount),
       'Observación': ''
     }));
     const workbook = XLSX.utils.book_new();
     const wsPedido = XLSX.utils.aoa_to_sheet([
-      ['PICKING DE CONTINGENCIA - NO ES UN VALE NI DESCUENTA INVENTARIO'],
+      ['HOJA DE PICKING - CONSULTA DE UBICACIONES'],
       ['Fecha de preparación', now], ['Solicitado por', generated.meta.requester],
       ['Área solicitante', generated.meta.department],
       ['No. solicitud / vale', generated.meta.document],
@@ -234,7 +272,7 @@ export default function PickingPage({ user, onGoToInventory }) {
     if (!generated || planError) return;
     window.print();
   }
-  const missingCount = results?.summary.filter((r) => r.wmsLines === 0).length || 0;
+  const missingCount = results?.summary.filter((r) => !r.originalWmsLines).length || 0;
   const flaggedCount = results?.details.filter((r) => r.flagged).length || 0;
 
   return <div className="pk-page">
@@ -254,7 +292,7 @@ export default function PickingPage({ user, onGoToInventory }) {
         <label>Solicitado por<input value={requester} onChange={(e) => setRequester(e.target.value)} placeholder="Opcional" /></label>
         <label>Área solicitante<input value={department} onChange={(e) => setDepartment(e.target.value)} placeholder="Opcional" /></label>
         <label>No. solicitud / vale<input value={document} onChange={(e) => setDocument(e.target.value)} placeholder="Opcional" /></label>
-        <label>Almacén (WMS)<select value={warehouseFilter} onChange={(e) => { setWarehouseFilter(e.target.value); setGenerated(null); setPlan({}); }}>
+        <label>Almacén (WMS)<select value={warehouseFilter} onChange={(e) => { setWarehouseFilter(e.target.value); setGenerated(null); setPlan({}); setLineSelections({}); }}>
           <option value="">Todos los almacenes</option>{warehouses.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
       </div>
       <div className="pk-two-col">
@@ -264,7 +302,7 @@ export default function PickingPage({ user, onGoToInventory }) {
           <button type="button" className="pk-secondary" onClick={addBulk} disabled={!bulk.trim()}><Plus size={16}/> Agregar lista</button>
         </div>
         <div><div className="pk-inline-title"><h3>Solicitud actual ({entries.length} líneas)</h3>
-          <button type="button" className="pk-text-btn" onClick={() => { setEntries([freshLine()]); setGenerated(null); setPlan({}); setMessage(''); setError(''); }}>Limpiar</button></div>
+          <button type="button" className="pk-text-btn" onClick={() => { setEntries([freshLine()]); setGenerated(null); setPlan({}); setLineSelections({}); setMessage(''); setError(''); }}>Limpiar</button></div>
           <div className="pk-edit-table"><table><thead><tr><th>Código</th><th>Cantidad pedida</th><th></th></tr></thead>
             <tbody>{entries.map((r) => <tr key={r.id}>
               <td><input aria-label="Código de material" value={r.code} onChange={(e) => updateEntry(r.id, 'code', e.target.value)} placeholder="Código" /></td>
@@ -285,6 +323,32 @@ export default function PickingPage({ user, onGoToInventory }) {
         <div className="pk-export pk-no-print"><button type="button" className="pk-secondary" disabled={Boolean(planError)} onClick={printPicking}><Printer size={16}/> Imprimir / PDF</button>
           <button type="button" className="pk-primary" disabled={Boolean(planError)} onClick={exportExcel}><Download size={17}/> Descargar Excel</button></div>
       </header>
+      {codeOptions.length > 0 && <div className="pk-area-filters pk-no-print">
+        <div className="pk-inline-title"><h3>Filtrar por área y solicitante para cada código</h3>
+          <button type="button" className="pk-text-btn" onClick={() => { setLineSelections({}); setPlan({}); }}>Mostrar todas las áreas</button></div>
+        <p className="pk-muted">Elige el área y/o solicitante. Solo las líneas WMS seleccionadas aparecerán en la impresión y el Excel. La referencia SAP se conserva sin filtrar.</p>
+        <div className="pk-area-grid">{codeOptions.map((item) => {
+          const chosen = lineSelections[item.key] || {};
+          const requesterRows = chosen.department
+            ? item.rows.filter((row) => chosen.department === PICKING_NO_DATA
+              ? !String(row.department || '').trim()
+              : normalizeSearch(row.department) === normalizeSearch(chosen.department))
+            : item.rows;
+          const requesterOptions = pickingFieldOptions(requesterRows, 'requester');
+          const activeCount = results.details.filter((row) => row.requestKey === item.key).length;
+          return <div className="pk-area-card" key={item.key}>
+            <div className="pk-area-card-head"><strong>{normalizeCode(item.code)}</strong><small>{activeCount} de {item.rows.length} líneas WMS</small></div>
+            <label>Área / departamento WMS<select value={chosen.department || ''} onChange={(e) => changeSelection(item.key, 'department', e.target.value)}>
+              <option value="">Todas las áreas</option>
+              {item.departments.map((value) => <option key={value.value} value={value.value}>{value.label}</option>)}
+            </select></label>
+            <label>Solicitante WMS<select value={chosen.requester || ''} onChange={(e) => changeSelection(item.key, 'requester', e.target.value)}>
+              <option value="">Todos los solicitantes</option>
+              {requesterOptions.map((value) => <option key={value.value} value={value.value}>{value.label}</option>)}
+            </select></label>
+          </div>;
+        })}</div>
+      </div>}
       <div className="pk-print-meta">
         <MetaLine title="Solicitado por" text={generated.meta.requester}/>
         <MetaLine title="Área" text={generated.meta.department}/>
@@ -299,7 +363,7 @@ export default function PickingPage({ user, onGoToInventory }) {
       </div>
       <h3>Resumen del pedido</h3>
       <div className="pk-scroll"><table className="pk-table pk-summary"><thead><tr>
-        <th>Código</th><th>Descripción</th><th>Solicitado</th><th>WMS referencial</th><th>SAP referencial</th><th>Propuesto</th><th>Pendiente</th><th>Estado</th>
+        <th>Código</th><th>Descripción</th><th>Solicitado</th><th>WMS referencial</th><th>SAP referencial</th><th>A separar</th><th>Sin asignar</th><th>Estado</th>
       </tr></thead><tbody>{results.summary.map((item) => {
         const proposed = plannedPerCode.get(item.key) || 0;
         return <tr key={item.key}><td className="pk-nowrap"><b>{normalizeCode(item.code)}</b></td><td>{item.description || 'Sin descripción'}</td>
@@ -314,7 +378,7 @@ export default function PickingPage({ user, onGoToInventory }) {
       <div className="pk-inline-title"><h3>Detalle físico por lote y ubicación</h3>
         <label className="pk-no-print">Ordenar por <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
           <option value="location">Almacén y ubicación</option><option value="code">Código</option></select></label></div>
-      <p className="pk-muted pk-no-print">Puedes indicar cantidades propuestas por ubicación. Es opcional y no descuenta existencias; el personal confirma lo retirado y registra el vale manual.</p>
+      <p className="pk-muted pk-no-print">«A separar» es opcional: indica cuánto piensas recoger de cada lote y ubicación. No descuenta inventario.</p>
       <div className="pk-scroll pk-screen-details pk-no-print"><table className="pk-table"><thead><tr>
         <th>Código</th><th>Descripción</th><th>Almacén</th><th>Ubicación</th><th>Lote</th><th>WMS</th><th>UM</th><th>A recoger</th><th>Solicitante</th><th>Área</th><th>Bloqueo / trabajo</th>
       </tr></thead><tbody>{details.map((r) => <tr className={r.flagged ? 'pk-flagged' : ''} key={r.rowKey}>
@@ -326,17 +390,15 @@ export default function PickingPage({ user, onGoToInventory }) {
           disabled={r.flagged} value={plan[r.rowKey] ?? ''} onChange={(e) => setPlan((current) => ({ ...current, [r.rowKey]: e.target.value }))} placeholder={r.flagged ? 'Revisar' : '0'} /></td>
         <td>{r.requester}</td><td>{r.department}</td><td>{r.lock || '—'} / {r.workStatus || '—'}{r.flagged && <strong className="pk-flag-text">Revisar antes de retirar</strong>}</td>
       </tr>)}
-      {!details.length && <tr><td colSpan="11" className="pk-empty">No se encontraron ubicaciones WMS para los códigos consultados.</td></tr>}
+      {!details.length && <tr><td colSpan="11" className="pk-empty">No hay ubicaciones WMS para los códigos y filtros seleccionados.</td></tr>}
       </tbody></table></div>
       <div className="pk-only-print"><table className="pk-table"><thead><tr>
-        <th>Código</th><th>Almacén</th><th>Ubicación</th><th>Lote</th><th>WMS</th><th>UM</th><th>Propuesto</th><th>Retirado</th><th>Área</th><th>Estado</th>
+        <th>Código</th><th>Almacén</th><th>Ubicación</th><th>Lote</th><th>WMS</th><th>UM</th><th>A separar</th><th>Retirado</th><th>Área</th><th>Estado</th>
       </tr></thead><tbody>{details.map((r) => <tr key={r.rowKey}>
         <td>{normalizeCode(r.code)}</td><td>{r.warehouse}</td><td>{r.location}</td><td>{r.lot}</td><td>{formatQty(r.quantity)}</td>
         <td>{r.unit}</td><td>{toAmount(plan[r.rowKey]) || '—'}</td><td>________</td><td>{r.department}</td>
         <td>{r.flagged ? 'REVISAR' : r.lock + ' / ' + r.workStatus}</td></tr>)}
       </tbody></table></div>
-      <p className="pk-footnote">CONTINGENCIA · No es salida WMS/SAP ni constituye vale de entrega. Verificar stock físico, lotes, bloqueos y autorización antes de despachar. Registrar el vale manual por separado.</p>
-      <div className="pk-sign pk-only-print"><span>Preparó: _____________________</span><span>Revisó: _____________________</span><span>Fecha: ______________</span></div>
     </section>}
   </div>;
 }
