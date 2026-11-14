@@ -58,6 +58,7 @@ export default function PickingPage({ user, onGoToInventory }) {
   const [document, setDocument] = useState('');
   const [reservation, setReservation] = useState('');
   const [costCenter, setCostCenter] = useState('');
+  const [observations, setObservations] = useState('');
   const [warehouseFilter, setWarehouseFilter] = useState('');
   const [generated, setGenerated] = useState(null);
   const [plan, setPlan] = useState({});
@@ -201,7 +202,8 @@ export default function PickingPage({ user, onGoToInventory }) {
         meta: {
           requester: requester.trim(), department: department.trim(),
           document: document.trim(), reservation: reservation.trim(),
-          costCenter: costCenter.trim(), warehouse: warehouseFilter
+          costCenter: costCenter.trim(), observations: observations.trim(),
+          warehouse: warehouseFilter
         },
         wmsSnapshot: reports.wms?.snapshot || 'Sin WMS',
         sapSnapshot: reports.sap?.snapshot || 'Sin SAP'
@@ -264,12 +266,13 @@ export default function PickingPage({ user, onGoToInventory }) {
       ['Número de ticket', generated.meta.document],
       ['Número de Reserva / OT', generated.meta.reservation],
       ['Centro de costo', generated.meta.costCenter],
+      ['Observaciones', generated.meta.observations],
       ['Filtro de almacén WMS', generated.meta.warehouse || 'Todos'],
       ['Fecha de base WMS', generated.wmsSnapshot],
       ['Fecha de base SAP', generated.sapSnapshot],
       ['IMPORTANTE', 'Verificar físicamente antes de retirar. Las bases pueden estar desactualizadas.']
     ]);
-    XLSX.utils.sheet_add_json(wsPedido, pedido, { origin: 'A13' });
+    XLSX.utils.sheet_add_json(wsPedido, pedido, { origin: 'A14' });
     wsPedido['!cols'] = [14, 45, 20, 15, 20, 17, 20, 19, 20, 15, 24, 21, 22, 24];
     XLSX.utils.book_append_sheet(workbook, wsPedido, 'PEDIDO');
     XLSX.utils.book_append_sheet(workbook,
@@ -310,6 +313,7 @@ export default function PickingPage({ user, onGoToInventory }) {
         <label>Número de ticket<input value={document} onChange={(e) => setDocument(e.target.value)} placeholder="Opcional" /></label>
         <label>Número de Reserva / OT<input value={reservation} onChange={(e) => setReservation(e.target.value)} placeholder="Opcional" /></label>
         <label>Centro de costo<input value={costCenter} onChange={(e) => setCostCenter(e.target.value)} placeholder="Opcional" /></label>
+        <label className="pk-observations-field">Observaciones<textarea rows={2} value={observations} onChange={(e) => setObservations(e.target.value)} placeholder="Opcional: indicaciones para la separación o entrega" /></label>
         <label>Almacén (WMS)<select value={warehouseFilter} onChange={(e) => { setWarehouseFilter(e.target.value); setGenerated(null); setPlan({}); setLineSelections({}); }}>
           <option value="">Todos los almacenes</option>{warehouses.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
       </div>
@@ -375,6 +379,7 @@ export default function PickingPage({ user, onGoToInventory }) {
         <MetaLine title="Centro de costo" text={generated.meta.costCenter}/>
         <MetaLine title="Almacén consultado" text={generated.meta.warehouse || 'Todos'}/>
       </div>
+      <div className="pk-print-observations"><span>Observaciones</span><strong>{generated.meta.observations || "No indicado"}</strong></div>
       <div className="pk-stats">
         <div><span>Códigos</span><strong className="pk-no-print">{results.summary.length}</strong><strong className="pk-only-print">{printCodeCount}</strong></div>
         <div><span>Líneas WMS</span><strong className="pk-no-print">{formatQty(results.details.length)}</strong><strong className="pk-only-print">{formatQty(printDetails.length)}</strong></div>
