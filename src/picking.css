@@ -12,3 +12,15 @@
   .pk-signature-line{border-bottom:1px solid #333;height:36px;margin-bottom:7px}
   .pk-signature strong{font-size:9pt;font-weight:600}
 }
+
+.pk-observations-field{grid-column:span 2}
+.pk-observations-field textarea{min-height:65px;resize:vertical;line-height:1.45}
+.pk-print-observations{display:grid;gap:5px;margin:0 0 14px;padding:10px 11px;border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;break-inside:avoid;page-break-inside:avoid}
+.pk-print-observations span{font-size:.72rem;color:#64748b}
+.pk-print-observations strong{font-size:.83rem;font-weight:600;color:#334155;white-space:pre-wrap;overflow-wrap:anywhere}
+@media(max-width:600px){.pk-observations-field{grid-column:auto}}
+@media print{
+  .pk-print-observations{border:1px solid #777;background:white;padding:6px 8px;margin:8px 0 12px;break-inside:avoid;page-break-inside:avoid}
+  .pk-print-observations span{font-size:7pt;color:black}
+  .pk-print-observations strong{font-size:8pt;color:black}
+}
