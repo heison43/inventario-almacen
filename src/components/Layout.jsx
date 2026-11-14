@@ -85,7 +85,7 @@ export default function Layout({ user, view, setView, onLogout, onSync, syncMess
           </button>
           <div>
             <h1>{titleByView(view)}</h1>
-            {view === 'reference-inventory' ? <p>Consulta temporal por código, lote, almacén y ubicación.</p> : view === 'picking' ? <p>Preparación de solicitudes múltiples durante la contingencia.</p> : <p>Conteo por zona, ubicación, código y lote.</p>}
+            {view === 'reference-inventory' ? <p>Consulta temporal por código, lote, almacén y ubicación.</p> : view === 'picking' ? <p>Preparación de solicitudes múltiples.</p> : <p>Conteo por zona, ubicación, código y lote.</p>}
           </div>
           <div className="topbar-actions">
             <button className="secondary-button" onClick={handleSync} disabled={syncing || !onlineMode} title={onlineMode ? 'Sincronizar con Supabase' : 'Configura Supabase para sincronizar'}>

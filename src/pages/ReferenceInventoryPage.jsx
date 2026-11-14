@@ -193,7 +193,7 @@ export default function ReferenceInventoryPage({ user }) {
   return <div className="ri-page">
     <section className="panel-card ri-panel">
       <header className="ri-heading"><Database size={26} /><div><h2>Consulta inventario · SAP / WMS</h2>
-        <p>Contingencia de consulta. No crea movimientos ni modifica campañas de conteo.</p></div></header>
+        <p>No crea movimientos ni modifica campañas de conteo.</p></div></header>
       <div className="ri-warning"><AlertTriangle size={17} />
         <span>Son reportes con fechas distintas. WMS orienta sobre ubicaciones; SAP informa cantidades según su fecha de corte. Comprueba físicamente antes de separar o ajustar materiales.</span>
       </div>
